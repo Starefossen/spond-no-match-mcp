@@ -11,7 +11,7 @@ testdata/
 *.md
 test_*.py
 conftest.py
-test-mcp.sh
+scripts/
 requirements-dev.txt
 pyproject.toml
 .mise.toml

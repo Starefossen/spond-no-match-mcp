@@ -132,7 +132,7 @@ ruff check .
 
 ## Homelab Deployment
 
-This server is designed to run on Knative with scale-to-zero. See [knative-service.yaml](knative-service.yaml) and [.mise.toml](.mise.toml) for deployment tasks.
+This server is designed to run on Knative with scale-to-zero. See [knative-service.yaml](config/knative-service.yaml) and [.mise.toml](.mise.toml) for deployment tasks.
 
 ```bash
 # Build and deploy (requires mise + Docker + kubectl)

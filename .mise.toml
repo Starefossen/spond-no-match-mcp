@@ -121,11 +121,11 @@ run = "../../scripts/app-deploy.sh test ${APP_NAME} ${NAMESPACE}"
 [tasks."test:mcp"]
 description = "Run comprehensive MCP protocol tests"
 raw = true
-run = "./test-mcp.sh"
+run = "./scripts/test-mcp.sh"
 
 [tasks."test:mcp-local"]
 description = "Integration test against local server"
-run = "./test-mcp.sh http://localhost:8080"
+run = "./scripts/test-mcp.sh http://localhost:8080"
 
 [tasks.delete]
 description = "Delete service"
