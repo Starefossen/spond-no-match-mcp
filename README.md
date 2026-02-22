@@ -64,6 +64,7 @@ docker run -p 8080:8080 \
 | `SPOND_USERNAME` | Yes      |                         | Spond account email                               |
 | `SPOND_PASSWORD` | Yes      |                         | Spond account password                            |
 | `KIDS_CONFIG`    | No       | `[]`                    | JSON array mapping kid names to Spond group names |
+| `MCP_AUTH_TOKEN` | No       |                         | Bearer token for authentication (see below)       |
 | `PORT`           | No       | `8080`                  | Server port                                       |
 | `BASE_URL`       | No       | `http://localhost:8080` | Public URL for SSE endpoint construction          |
 
@@ -80,9 +81,21 @@ Maps your children's first names to their Spond group names. Group matching is f
 
 Without `KIDS_CONFIG`, the server still works but can't filter by kid or show per-kid attendance.
 
+## Authentication
+
+This server handles sensitive family data and supports bearer token authentication. When `MCP_AUTH_TOKEN` is set, all requests (except `/health`) must include an `Authorization: Bearer <token>` header.
+
+- `/health` is always exempt (Knative probes don't send auth headers)
+- When `MCP_AUTH_TOKEN` is empty, auth is disabled (backward compatible)
+- Uses constant-time comparison to prevent timing attacks
+
+For homelab deployment, the token is stored in macOS System Keychain (client) and K8s Secret (server). See [Creating MCP Servers](../../docs/creating-mcp-servers.md#authentication-bearer-token) for setup.
+
 ## Usage with mcporter
 
-[mcporter](https://github.com/steipete/mcporter) can connect to this server as a remote MCP tool:
+[mcporter](https://github.com/steipete/mcporter) can connect to this server as a remote MCP tool.
+
+For authenticated servers, mcporter must be configured with the Authorization header (handled automatically by `mise run setup:mcp-token` in `apps/varden/`).
 
 ```bash
 # List all groups
@@ -123,7 +136,7 @@ spond-mcp (:8080)
 # Install dev dependencies
 pip install -r requirements.txt -r requirements-dev.txt
 
-# Run tests (79 tests)
+# Run tests (87 tests, including auth middleware tests)
 pytest -v
 
 # Lint
@@ -134,11 +147,13 @@ ruff check .
 
 This server is designed to run on Knative with scale-to-zero. See [knative-service.yaml](config/knative-service.yaml) and [.mise.toml](.mise.toml) for deployment tasks.
 
+Authentication is enabled via `MCP_AUTH_TOKEN` from a K8s Secret (`mcp-auth-token` in `mcp` namespace).
+
 ```bash
 # Build and deploy (requires mise + Docker + kubectl)
 mise run full-deploy
 
-# Integration test against deployed service
+# Integration test against deployed service (auto-fetches auth token from K8s)
 mise run test:mcp
 ```
 

@@ -119,9 +119,12 @@ description = "Test the deployed service (health check)"
 run = "../../scripts/app-deploy.sh test ${APP_NAME} ${NAMESPACE}"
 
 [tasks."test:mcp"]
-description = "Run comprehensive MCP protocol tests"
+description = "Run comprehensive MCP protocol tests (fetches auth token from K8s)"
 raw = true
-run = "./scripts/test-mcp.sh"
+run = """
+export MCP_AUTH_TOKEN=$(kubectl get secret mcp-auth-token -n mcp -o jsonpath='{.data.token}' | base64 -d)
+./scripts/test-mcp.sh
+"""
 
 [tasks."test:mcp-local"]
 description = "Integration test against local server"

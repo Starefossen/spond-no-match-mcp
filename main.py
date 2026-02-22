@@ -1,5 +1,6 @@
 """Spond MCP server entry point — Starlette app with health + SSE endpoints."""
 
+import hmac
 import json
 import logging
 import os
@@ -11,6 +12,8 @@ from mcp.server.sse import SseServerTransport
 from mcp.types import TextContent, Tool
 from spond.spond import Spond
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 from starlette.routing import Mount, Route
@@ -20,7 +23,24 @@ from server import TOOLS, SpondService, handle_tool_call
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("spond-mcp")
 
+AUTH_TOKEN = os.environ.get("MCP_AUTH_TOKEN", "")
+
 service: SpondService | None = None
+
+
+class BearerAuthMiddleware(BaseHTTPMiddleware):
+    """Validate Bearer token on all requests except /health."""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/health":
+            return await call_next(request)
+        if not AUTH_TOKEN:
+            return await call_next(request)
+        auth = request.headers.get("authorization", "")
+        if not auth.startswith("Bearer ") or not hmac.compare_digest(auth[7:], AUTH_TOKEN):
+            logger.warning("Unauthorized request to %s from %s", request.url.path, request.client.host if request.client else "unknown")
+            return PlainTextResponse("unauthorized", status_code=401)
+        return await call_next(request)
 
 
 def create_service() -> SpondService:
@@ -87,11 +107,15 @@ app = Starlette(
         Route("/sse", handle_sse),
         Mount("/messages/", app=sse.handle_post_message),
     ],
+    middleware=[Middleware(BearerAuthMiddleware)],
     lifespan=lifespan,
 )
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
-    logger.info("spond MCP server starting on :%d", port)
+    if AUTH_TOKEN:
+        logger.info("spond MCP server starting on :%d (auth enabled)", port)
+    else:
+        logger.warning("spond MCP server starting on :%d (NO AUTH — set MCP_AUTH_TOKEN)", port)
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info", http="h11")

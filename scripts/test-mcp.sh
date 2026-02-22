@@ -2,11 +2,18 @@
 set -euo pipefail
 
 BASE_URL="${1:-https://spond.mcp.fn.flaatten.org}"
+AUTH_TOKEN="${MCP_AUTH_TOKEN:-}"
 SSE_OUTPUT=$(mktemp)
 trap 'kill $SSE_PID 2>/dev/null; rm -f "$SSE_OUTPUT"' EXIT
 
+AUTH_HEADER=()
+if [[ -n "$AUTH_TOKEN" ]]; then
+  AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
+fi
+
 echo "=== spond MCP Service Test ==="
 echo "URL: $BASE_URL"
+[[ -n "$AUTH_TOKEN" ]] && echo "Auth: enabled" || echo "Auth: disabled"
 echo ""
 
 # Health check
@@ -15,7 +22,7 @@ HEALTH=$(curl -sf "$BASE_URL/health")
 [[ "$HEALTH" == "ok" ]] && echo "OK" || { echo "FAILED: $HEALTH"; exit 1; }
 
 # Connect SSE in background
-curl -sN "$BASE_URL/sse" > "$SSE_OUTPUT" 2>&1 &
+curl -sN "${AUTH_HEADER[@]}" "$BASE_URL/sse" > "$SSE_OUTPUT" 2>&1 &
 SSE_PID=$!
 sleep 2
 
@@ -42,6 +49,7 @@ LINES_SEEN=0
 
 post() {
   curl -sf -X POST "$MESSAGE_URL" \
+    "${AUTH_HEADER[@]}" \
     -H "Content-Type: application/json" -d "$1" || true
 }
 

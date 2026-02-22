@@ -36,6 +36,11 @@ spec:
             secretKeyRef:
               name: spond-credentials
               key: password
+        - name: MCP_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: mcp-auth-token
+              key: token
         - name: KIDS_CONFIG
           value: '<!-- FAMILY:KIDS_SPOND -->'
         resources:

@@ -520,3 +520,68 @@ class TestServiceLifecycle:
     async def test_close(self, service):
         await service.close()
         service._client.clientsession.close.assert_awaited_once()
+
+
+# --- Bearer auth middleware ---
+
+
+class TestBearerAuth:
+    @pytest.fixture(autouse=True)
+    def _patch_token(self, monkeypatch):
+        monkeypatch.setattr("main.AUTH_TOKEN", "test-secret-token")
+
+    @pytest.fixture
+    def client(self):
+        from starlette.testclient import TestClient
+        from main import app
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_health_no_auth_required(self, client):
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.text == "ok"
+
+    def test_sse_rejected_without_token(self, client):
+        resp = client.get("/sse")
+        assert resp.status_code == 401
+        assert resp.text == "unauthorized"
+
+    def test_sse_rejected_with_wrong_token(self, client):
+        resp = client.get("/sse", headers={"Authorization": "Bearer wrong-token"})
+        assert resp.status_code == 401
+
+    def test_sse_rejected_with_malformed_header(self, client):
+        resp = client.get("/sse", headers={"Authorization": "Basic dXNlcjpwYXNz"})
+        assert resp.status_code == 401
+
+    def test_messages_rejected_without_token(self, client):
+        resp = client.post("/messages/")
+        assert resp.status_code == 401
+
+    def test_accepted_with_valid_token(self, client):
+        # Test that valid token passes through middleware (not 401)
+        # Use /messages/ since /sse is a long-lived streaming endpoint
+        resp = client.post("/messages/", headers={"Authorization": "Bearer test-secret-token"})
+        assert resp.status_code != 401
+
+
+class TestBearerAuthDisabled:
+    """When MCP_AUTH_TOKEN is empty, all requests pass through."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_token(self, monkeypatch):
+        monkeypatch.setattr("main.AUTH_TOKEN", "")
+
+    @pytest.fixture
+    def client(self):
+        from starlette.testclient import TestClient
+        from main import app
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_messages_allowed_without_token(self, client):
+        resp = client.post("/messages/")
+        assert resp.status_code != 401
+
+    def test_health_still_works(self, client):
+        resp = client.get("/health")
+        assert resp.status_code == 200
