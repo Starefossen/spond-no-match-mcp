@@ -8,6 +8,7 @@ An [MCP](https://modelcontextprotocol.io/) server for managing kids' sports acti
 - **Family member mapping** — configure which kids belong to which groups
 - **Norwegian output** — responses formatted in Norwegian (dates, weekdays, status labels)
 - **TTL caching** — groups cached 1h, events 5min to minimize API calls
+- **Bearer token auth** — optional authentication for protecting sensitive family data
 - **Scale-to-zero ready** — lightweight Python server, works great on Knative
 
 ## Tools
@@ -83,19 +84,37 @@ Without `KIDS_CONFIG`, the server still works but can't filter by kid or show pe
 
 ## Authentication
 
-This server handles sensitive family data and supports bearer token authentication. When `MCP_AUTH_TOKEN` is set, all requests (except `/health`) must include an `Authorization: Bearer <token>` header.
+This server handles sensitive family data and supports optional bearer token authentication. When `MCP_AUTH_TOKEN` is set, all requests (except `/health`) must include an `Authorization: Bearer <token>` header.
 
-- `/health` is always exempt (Knative probes don't send auth headers)
-- When `MCP_AUTH_TOKEN` is empty, auth is disabled (backward compatible)
-- Uses constant-time comparison to prevent timing attacks
+- `/health` is always exempt (required for Knative/K8s health probes)
+- When `MCP_AUTH_TOKEN` is empty or unset, auth is disabled (backward compatible)
+- Uses constant-time comparison (`hmac.compare_digest`) to prevent timing attacks
 
-For homelab deployment, the token is stored in macOS System Keychain (client) and K8s Secret (server). See [Creating MCP Servers](../../docs/creating-mcp-servers.md#authentication-bearer-token) for setup.
+```bash
+# Run with auth enabled
+MCP_AUTH_TOKEN=my-secret-token \
+SPOND_USERNAME=you@example.com \
+SPOND_PASSWORD=your-password \
+python main.py
+
+# Test with auth
+curl -H "Authorization: Bearer my-secret-token" http://localhost:8080/sse
+```
+
+For Kubernetes deployments, store the token as a Secret and reference it in your service manifest:
+
+```yaml
+env:
+- name: MCP_AUTH_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: mcp-auth-token
+      key: token
+```
 
 ## Usage with mcporter
 
-[mcporter](https://github.com/steipete/mcporter) can connect to this server as a remote MCP tool.
-
-For authenticated servers, mcporter must be configured with the Authorization header (handled automatically by `mise run setup:mcp-token` in `apps/varden/`).
+[mcporter](https://github.com/steipete/mcporter) can connect to this server as a remote MCP tool:
 
 ```bash
 # List all groups
@@ -112,6 +131,22 @@ mcporter call spond.respond_to_event event_id=ABC123 kid_name=Oliver accept=true
 
 # Search for upcoming matches
 mcporter call spond.search_events query=kamp days=30
+```
+
+For authenticated servers, configure mcporter with the Authorization header in `~/.mcporter/mcporter.json`:
+
+```json
+{
+  "mcpServers": {
+    "spond": {
+      "url": "https://your-spond-mcp.example.com/sse",
+      "transport": "sse",
+      "headers": {
+        "Authorization": "Bearer your-token-here"
+      }
+    }
+  }
+}
 ```
 
 ## Architecture
