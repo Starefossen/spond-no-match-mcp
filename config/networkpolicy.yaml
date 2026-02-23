@@ -32,6 +32,16 @@ spec:
             - port: "8080"
               protocol: TCP
 
+    # Allow metrics scraping from Knative autoscaler (required for scale-to-zero)
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: knative-serving
+            app: autoscaler
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+
   egress:
     # Allow DNS resolution
     - toEndpoints:
