@@ -184,6 +184,21 @@ class TestSpondServiceCache:
         assert service._client.get_events.await_count == 2
 
     @pytest.mark.asyncio
+    async def test_events_different_from_days_not_cached(self, service):
+        await service.get_events(days=14)
+        await service.get_events(days=14, from_days=7)
+        assert service._client.get_events.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_from_days_shifts_min_start(self, service):
+        await service.get_events(days=56, from_days=7)
+        call_kwargs = service._client.get_events.call_args
+        min_start = call_kwargs.kwargs["min_start"]
+        max_end = call_kwargs.kwargs["max_end"]
+        diff = (max_end - min_start).days
+        assert diff == 56  # days is the window size
+
+    @pytest.mark.asyncio
     async def test_clear_cache(self, service):
         await service.get_groups()
         await service.resolve_family_members()

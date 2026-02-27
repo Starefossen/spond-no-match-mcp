@@ -93,17 +93,18 @@ class SpondService:
         return []
 
     async def get_events(
-        self, days: int = 7, group_id: str | None = None
+        self, days: int = 7, group_id: str | None = None, from_days: int = 0
     ) -> list[dict]:
-        cache_key = f"events:{days}:{group_id or 'all'}"
+        cache_key = f"events:{days}:{from_days}:{group_id or 'all'}"
         cached = self._get_cached(cache_key, self.EVENTS_TTL)
         if cached is not None:
             return cached
 
         now = datetime.now(UTC)
+        min_start = now + timedelta(days=from_days) if from_days > 0 else now
         events = await self._client.get_events(
-            min_start=now,
-            max_end=now + timedelta(days=days),
+            min_start=min_start,
+            max_end=now + timedelta(days=from_days + days),
             group_id=group_id,
         )
         self._set_cached(cache_key, events)
@@ -261,8 +262,13 @@ TOOLS = [
             "properties": {
                 "days": {
                     "type": "integer",
-                    "description": "Antall dager fremover (standard: 7)",
+                    "description": "Antall dager å inkludere (standard: 7). Vindu = [from_days, from_days+days].",
                     "default": 7,
+                },
+                "from_days": {
+                    "type": "integer",
+                    "description": "Start fra N dager frem i tid (standard: 0 = fra nå). F.eks. from_days=7, days=56 gir uke 2-9.",
+                    "default": 0,
                 },
                 "group_name": {
                     "type": "string",
@@ -304,8 +310,13 @@ TOOLS = [
                 },
                 "days": {
                     "type": "integer",
-                    "description": "Antall dager fremover (standard: 14)",
+                    "description": "Antall dager å inkludere (standard: 14). Vindu = [from_days, from_days+days].",
                     "default": 14,
+                },
+                "from_days": {
+                    "type": "integer",
+                    "description": "Start fra N dager frem i tid (standard: 0 = fra nå). F.eks. from_days=7, days=56 gir uke 2-9.",
+                    "default": 0,
                 },
             },
         },
@@ -348,8 +359,13 @@ TOOLS = [
                 },
                 "days": {
                     "type": "integer",
-                    "description": "Antall dager fremover å søke i (standard: 30)",
+                    "description": "Antall dager å søke i (standard: 30). Vindu = [from_days, from_days+days].",
                     "default": 30,
+                },
+                "from_days": {
+                    "type": "integer",
+                    "description": "Start fra N dager frem i tid (standard: 0 = fra nå). F.eks. from_days=7, days=56 gir uke 2-9.",
+                    "default": 0,
                 },
             },
             "required": ["query"],
@@ -369,7 +385,7 @@ async def handle_list_groups(service: SpondService) -> str:
 
 
 async def handle_get_upcoming_events(
-    service: SpondService, days: int = 7, group_name: str = "", kid_name: str = ""
+    service: SpondService, days: int = 7, group_name: str = "", kid_name: str = "", from_days: int = 0
 ) -> str:
     group_id = None
 
@@ -378,13 +394,12 @@ async def handle_get_upcoming_events(
         if not kid_group_names:
             return f"Ukjent barn: {kid_name}"
         groups = await service.get_groups()
-        # Collect events from all the kid's groups
         all_events: list[dict] = []
         seen_ids: set[str] = set()
         for gname in kid_group_names:
             gid = service.find_group_id(gname, groups)
             if gid:
-                events = await service.get_events(days=days, group_id=gid)
+                events = await service.get_events(days=days, group_id=gid, from_days=from_days)
                 for e in events:
                     eid = e.get("id", "")
                     if eid not in seen_ids:
@@ -396,9 +411,9 @@ async def handle_get_upcoming_events(
         group_id = service.find_group_id(group_name, groups)
         if not group_id:
             return f"Fant ingen gruppe som matcher '{group_name}'"
-        events = await service.get_events(days=days, group_id=group_id)
+        events = await service.get_events(days=days, group_id=group_id, from_days=from_days)
     else:
-        events = await service.get_events(days=days)
+        events = await service.get_events(days=days, from_days=from_days)
 
     if not events:
         scope = f" for {kid_name}" if kid_name else (f" i {group_name}" if group_name else "")
@@ -427,7 +442,7 @@ async def handle_get_event_details(service: SpondService, event_id: str) -> str:
 
 
 async def handle_get_attendance(
-    service: SpondService, kid_name: str = "", days: int = 14
+    service: SpondService, kid_name: str = "", days: int = 14, from_days: int = 0
 ) -> str:
     if kid_name:
         kid_group_names = service.get_kid_group_names(kid_name)
@@ -439,13 +454,13 @@ async def handle_get_attendance(
         for gname in kid_group_names:
             gid = service.find_group_id(gname, groups)
             if gid:
-                for e in await service.get_events(days=days, group_id=gid):
+                for e in await service.get_events(days=days, group_id=gid, from_days=from_days):
                     if e.get("id", "") not in seen_ids:
                         seen_ids.add(e["id"])
                         all_events.append(e)
         events = all_events
     else:
-        events = await service.get_events(days=days)
+        events = await service.get_events(days=days, from_days=from_days)
 
     if not events:
         return "Ingen kommende aktiviteter."
@@ -500,9 +515,9 @@ async def handle_respond_to_event(
 
 
 async def handle_search_events(
-    service: SpondService, query: str, days: int = 30
+    service: SpondService, query: str, days: int = 30, from_days: int = 0
 ) -> str:
-    events = await service.get_events(days=days)
+    events = await service.get_events(days=days, from_days=from_days)
     query_lower = query.lower()
 
     matches = []
@@ -538,6 +553,7 @@ async def handle_tool_call(
             days=args.get("days", 7),
             group_name=args.get("group_name", ""),
             kid_name=args.get("kid_name", ""),
+            from_days=args.get("from_days", 0),
         )
     elif name == "get_event_details":
         event_id = args.get("event_id", "")
@@ -549,6 +565,7 @@ async def handle_tool_call(
             service,
             kid_name=args.get("kid_name", ""),
             days=args.get("days", 14),
+            from_days=args.get("from_days", 0),
         )
     elif name == "respond_to_event":
         event_id = args.get("event_id", "")
@@ -571,6 +588,7 @@ async def handle_tool_call(
             service,
             query=query,
             days=args.get("days", 30),
+            from_days=args.get("from_days", 0),
         )
     else:
         return f"Ukjent verktøy: {name}"
