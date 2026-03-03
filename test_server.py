@@ -105,6 +105,37 @@ class TestFormatEventSummary:
         result = format_event_summary(MOCK_EVENT_CANCELLED)
         assert "AVLYST" in result
 
+    def test_cancelled_event_with_reason(self):
+        result = format_event_summary(MOCK_EVENT_CANCELLED)
+        assert "AVLYST: Kamp i treningstid" in result
+
+    def test_cancelled_event_without_reason(self):
+        event = {**MOCK_EVENT_CANCELLED, "cancelledReason": ""}
+        result = format_event_summary(event)
+        assert "AVLYST" in result
+        assert "AVLYST:" not in result
+
+    def test_meetup_timestamp(self):
+        result = format_event_summary(MOCK_EVENTS_FJORDVIK[1])
+        assert "Oppmøte: kl. 17:30" in result
+
+    def test_no_meetup_timestamp(self):
+        result = format_event_summary(MOCK_EVENTS_FJORDVIK[0])
+        assert "Oppmøte:" not in result
+
+    def test_match_info_away(self):
+        result = format_event_summary(MOCK_EVENTS_FJORDVIK[1])
+        assert "Kamp: borte" in result
+
+    def test_match_info_home(self):
+        event = {**MOCK_EVENTS_FJORDVIK[1], "matchInfo": {"teamName": "Team", "opponentName": "Opp", "type": "HOME"}}
+        result = format_event_summary(event)
+        assert "Kamp: hjemme" in result
+
+    def test_no_match_info(self):
+        result = format_event_summary(MOCK_EVENTS_FJORDVIK[0])
+        assert "Kamp:" not in result
+
     def test_no_location(self):
         event = {**MOCK_EVENTS_FJORDVIK[0], "location": {}}
         result = format_event_summary(event)
@@ -125,6 +156,16 @@ class TestFormatEventSummary:
         assert "..." in result
         assert len([line for line in result.split("\n") if "x" in line][0]) < 210
 
+    def test_rsvp_date_shown(self):
+        result = format_event_summary(MOCK_EVENTS_FJORDVIK[1])
+        assert "Svarfrist:" in result
+        assert "24.02" in result
+        assert "12:00" in result
+
+    def test_no_rsvp_date(self):
+        result = format_event_summary(MOCK_EVENTS_FJORDVIK[0])
+        assert "Svarfrist:" not in result
+
 
 class TestFormatEventDetail:
     def test_includes_address(self):
@@ -139,6 +180,10 @@ class TestFormatEventDetail:
         result = format_event_detail(MOCK_EVENT_DETAIL)
         assert "Påmelding:" in result
         assert "1 ikke svart" in result
+
+    def test_includes_rsvp_date(self):
+        result = format_event_detail(MOCK_EVENT_DETAIL)
+        assert "Svarfrist:" in result
 
 
 class TestFormatGroupSummary:
@@ -328,6 +373,7 @@ class TestGetUpcomingEvents:
         )
         assert "Oliver" in result
         assert "Seriekamp" in result
+        assert "Nordvik minibane" not in result  # Solvik event excluded
 
     @pytest.mark.asyncio
     async def test_filter_by_group(self, service):
