@@ -92,8 +92,10 @@ class SpondService:
                 return kid.get("groups", [])
         return []
 
-    async def get_events(self, days: int = 7, from_days: int = 0) -> list[dict]:
-        cache_key = f"events:{days}:{from_days}"
+    async def get_events(
+        self, days: int = 7, group_id: str | None = None, from_days: int = 0
+    ) -> list[dict]:
+        cache_key = f"events:{days}:{from_days}:{group_id or 'all'}"
         cached = self._get_cached(cache_key, self.EVENTS_TTL)
         if cached is not None:
             return cached
@@ -103,23 +105,10 @@ class SpondService:
         events = await self._client.get_events(
             min_start=min_start,
             max_end=now + timedelta(days=from_days + days),
+            group_id=group_id,
         )
         self._set_cached(cache_key, events)
         return events
-
-    def filter_events_for_kid(self, events: list[dict], kid_name: str) -> list[dict]:
-        kid_group_names = self.get_kid_group_names(kid_name)
-        if not kid_group_names:
-            return []
-        kid_group_ids = set()
-        if self._group_map:
-            for gid, gname in self._group_map.items():
-                if fuzzy_match_group(gname, kid_group_names):
-                    kid_group_ids.add(gid)
-        return [
-            e for e in events
-            if e.get("recipients", {}).get("group", {}).get("id", "") in kid_group_ids
-        ]
 
     async def get_event(self, event_id: str) -> dict:
         return await self._client.get_event(event_id)
@@ -187,19 +176,8 @@ def format_event_summary(
     else:
         lines.append(heading)
 
-    match_info = event.get("matchInfo")
-    if match_info:
-        match_type = match_info.get("type", "")
-        match_label = "hjemme" if match_type == "HOME" else "borte" if match_type == "AWAY" else ""
-        if match_label:
-            lines.append(f"Kamp: {match_label}")
-
     if loc_name:
         lines.append(f"Sted: {loc_name}")
-
-    meetup_dt = parse_timestamp(event.get("meetupTimestamp", ""))
-    if meetup_dt:
-        lines.append(f"Oppmøte: kl. {meetup_dt.strftime('%H:%M')}")
 
     if event.get("description"):
         desc = event["description"].strip()
@@ -230,11 +208,7 @@ def format_event_summary(
             lines.append("Svar: " + ", ".join(rsvp_parts))
 
     if event.get("cancelled"):
-        reason = event.get("cancelledReason", "")
-        if reason:
-            lines.append(f"AVLYST: {reason}")
-        else:
-            lines.append("AVLYST")
+        lines.append("AVLYST")
 
     return "\n".join(lines)
 
@@ -417,19 +391,33 @@ async def handle_list_groups(service: SpondService) -> str:
 async def handle_get_upcoming_events(
     service: SpondService, days: int = 7, group_name: str = "", kid_name: str = "", from_days: int = 0
 ) -> str:
-    events = await service.get_events(days=days, from_days=from_days)
+    group_id = None
 
     if kid_name:
-        if not service.get_kid_group_names(kid_name):
+        kid_group_names = service.get_kid_group_names(kid_name)
+        if not kid_group_names:
             return f"Ukjent barn: {kid_name}"
-        await service.get_group_map()
-        events = service.filter_events_for_kid(events, kid_name)
+        groups = await service.get_groups()
+        all_events: list[dict] = []
+        seen_ids: set[str] = set()
+        for gname in kid_group_names:
+            gid = service.find_group_id(gname, groups)
+            if gid:
+                events = await service.get_events(days=days, group_id=gid, from_days=from_days)
+                for e in events:
+                    eid = e.get("id", "")
+                    if eid not in seen_ids:
+                        seen_ids.add(eid)
+                        all_events.append(e)
+        events = sorted(all_events, key=lambda e: e.get("startTimestamp", ""))
     elif group_name:
         groups = await service.get_groups()
         group_id = service.find_group_id(group_name, groups)
         if not group_id:
             return f"Fant ingen gruppe som matcher '{group_name}'"
-        events = [e for e in events if e.get("recipients", {}).get("group", {}).get("id") == group_id]
+        events = await service.get_events(days=days, group_id=group_id, from_days=from_days)
+    else:
+        events = await service.get_events(days=days, from_days=from_days)
 
     if not events:
         scope = f" for {kid_name}" if kid_name else (f" i {group_name}" if group_name else "")
@@ -460,13 +448,23 @@ async def handle_get_event_details(service: SpondService, event_id: str) -> str:
 async def handle_get_attendance(
     service: SpondService, kid_name: str = "", days: int = 14, from_days: int = 0
 ) -> str:
-    events = await service.get_events(days=days, from_days=from_days)
-
     if kid_name:
-        if not service.get_kid_group_names(kid_name):
+        kid_group_names = service.get_kid_group_names(kid_name)
+        if not kid_group_names:
             return f"Ukjent barn: {kid_name}"
-        await service.get_group_map()
-        events = service.filter_events_for_kid(events, kid_name)
+        groups = await service.get_groups()
+        all_events: list[dict] = []
+        seen_ids: set[str] = set()
+        for gname in kid_group_names:
+            gid = service.find_group_id(gname, groups)
+            if gid:
+                for e in await service.get_events(days=days, group_id=gid, from_days=from_days):
+                    if e.get("id", "") not in seen_ids:
+                        seen_ids.add(e["id"])
+                        all_events.append(e)
+        events = all_events
+    else:
+        events = await service.get_events(days=days, from_days=from_days)
 
     if not events:
         return "Ingen kommende aktiviteter."

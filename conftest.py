@@ -1,6 +1,6 @@
 """Shared pytest fixtures with realistic mock Spond data."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -102,16 +102,8 @@ MOCK_EVENTS_FJORDVIK = [
         "type": "EVENT",
         "startTimestamp": "2026-02-25T18:00:00.000+00:00",
         "endTimestamp": "2026-02-25T19:30:00.000+00:00",
-        "meetupTimestamp": "2026-02-25T17:30:00.000+00:00",
         "rsvpDate": "2026-02-24T12:00:00.000+00:00",
         "cancelled": False,
-        "matchEvent": True,
-        "matchInfo": {
-            "teamName": "Fjordvik FK G2013",
-            "opponentName": "Havnes",
-            "type": "AWAY",
-            "scoresPublic": False,
-        },
         "description": "Oppmøte 17:30. Husk drakt og leggskinn.",
         "location": {
             "feature": "Havnes Arena",
@@ -160,7 +152,6 @@ MOCK_EVENT_CANCELLED = {
     "startTimestamp": "2026-02-26T17:00:00.000+00:00",
     "endTimestamp": "2026-02-26T18:30:00.000+00:00",
     "cancelled": True,
-    "cancelledReason": "Kamp i treningstid",
     "description": "Avlyst pga. snø",
     "location": {"feature": "Fjordvik kunstgress"},
     "responses": {
@@ -193,9 +184,20 @@ def mock_spond_client():
     client = AsyncMock()
     client.get_groups = AsyncMock(return_value=MOCK_GROUPS)
 
-    client.get_events = AsyncMock(return_value=MOCK_ALL_EVENTS)
+    async def mock_get_events(min_start=None, max_end=None, group_id=None, **kwargs):
+        if group_id == "GROUP_FJORDVIK":
+            return MOCK_EVENTS_FJORDVIK
+        elif group_id == "GROUP_SOLVIK":
+            return MOCK_EVENTS_SOLVIK
+        elif group_id == "GROUP_NORDVIK":
+            return []
+        return MOCK_ALL_EVENTS
+
+    client.get_events = AsyncMock(side_effect=mock_get_events)
     client.get_event = AsyncMock(return_value=MOCK_EVENT_DETAIL)
     client.change_response = AsyncMock()
+    client.clientsession = MagicMock()
+    client.clientsession.close = AsyncMock()
     return client
 
 
