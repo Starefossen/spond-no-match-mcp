@@ -195,7 +195,7 @@ def mock_spond_client():
 
     client.get_events = AsyncMock(side_effect=mock_get_events)
     client.get_event = AsyncMock(return_value=MOCK_EVENT_DETAIL)
-    client.change_response = AsyncMock()
+    client.change_response = AsyncMock(return_value={"acceptedIds": ["MEMBER_OLIVER"], "declinedIds": []})
     client.clientsession = MagicMock()
     client.clientsession.close = AsyncMock()
     return client

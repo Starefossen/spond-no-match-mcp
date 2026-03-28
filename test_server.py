@@ -434,6 +434,7 @@ class TestRespondToEvent:
 
     @pytest.mark.asyncio
     async def test_decline_with_message(self, service):
+        service._client.change_response.return_value = {"acceptedIds": [], "declinedIds": ["MEMBER_OLIVER"]}
         result = await handle_tool_call(
             service,
             "respond_to_event",
@@ -462,6 +463,26 @@ class TestRespondToEvent:
     async def test_missing_params(self, service):
         result = await handle_tool_call(service, "respond_to_event", {})
         assert "påkrevd" in result
+
+    @pytest.mark.asyncio
+    async def test_api_error(self, service):
+        service._client.change_response.return_value = {"error": "Unauthorized"}
+        result = await handle_tool_call(
+            service,
+            "respond_to_event",
+            {"event_id": "EVT_KAMP_1", "kid_name": "Oliver", "accept": True},
+        )
+        assert "feil" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_response_not_confirmed(self, service):
+        service._client.change_response.return_value = {"acceptedIds": [], "declinedIds": []}
+        result = await handle_tool_call(
+            service,
+            "respond_to_event",
+            {"event_id": "EVT_KAMP_1", "kid_name": "Oliver", "accept": True},
+        )
+        assert "ikke bekrefte" in result.lower() or "sjekk" in result.lower()
 
 
 class TestSearchEvents:

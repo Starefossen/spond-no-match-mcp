@@ -115,11 +115,13 @@ class SpondService:
 
     async def change_response(
         self, event_id: str, member_id: str, accept: bool, decline_message: str = ""
-    ) -> None:
+    ) -> dict:
         payload = {"accepted": "true"} if accept else {"accepted": "false"}
         if not accept and decline_message:
             payload["declineMessage"] = decline_message
-        await self._client.change_response(event_id, member_id, payload)
+        result = await self._client.change_response(event_id, member_id, payload)
+        self.clear_cache()
+        return result
 
     async def find_member_id(self, kid_name: str) -> str | None:
         family = await self.resolve_family_members()
@@ -513,9 +515,32 @@ async def handle_respond_to_event(
     if not member_id:
         return f"Fant ikke {kid_name} i noen Spond-gruppe."
 
-    await service.change_response(event_id, member_id, accept, decline_message)
-    action = "akseptert" if accept else "avslått"
-    return f"Aktivitet {action} for {kid_name}."
+    try:
+        result = await service.change_response(event_id, member_id, accept, decline_message)
+    except Exception as e:
+        logger.error("change_response failed for %s event %s: %s", kid_name, event_id, e)
+        return f"Feil ved svar for {kid_name}: {e}"
+
+    if isinstance(result, dict) and "error" in result:
+        logger.error("Spond API error for %s event %s: %s", kid_name, event_id, result)
+        return f"Spond returnerte feil for {kid_name}: {result.get('error', result)}"
+
+    accepted_ids = set()
+    declined_ids = set()
+    if isinstance(result, dict):
+        accepted_ids = set(result.get("acceptedIds", []))
+        declined_ids = set(result.get("declinedIds", []))
+
+    if accept and member_id in accepted_ids:
+        return f"Aktivitet akseptert for {kid_name}."
+    elif not accept and member_id in declined_ids:
+        return f"Aktivitet avslått for {kid_name}."
+    elif accept and member_id not in accepted_ids:
+        logger.warning("Response may not have been saved for %s (member %s) on event %s. API returned: %s", kid_name, member_id, event_id, result)
+        return f"Svar sendt for {kid_name}, men kunne ikke bekrefte at det ble lagret. Sjekk Spond-appen."
+    else:
+        action = "akseptert" if accept else "avslått"
+        return f"Aktivitet {action} for {kid_name}."
 
 
 async def handle_search_events(
