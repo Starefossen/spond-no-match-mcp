@@ -3,8 +3,6 @@ kind: Service
 metadata:
   name: spond
   namespace: mcp
-  labels:
-    networking.knative.dev/visibility: cluster-local
 spec:
   template:
     metadata:
