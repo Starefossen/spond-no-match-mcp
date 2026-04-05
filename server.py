@@ -121,6 +121,12 @@ class SpondService:
             payload["declineMessage"] = decline_message
         result = await self._client.change_response(event_id, member_id, payload)
         self.clear_cache()
+        if not isinstance(result, dict):
+            raise ValueError(f"Unexpected API response type: {type(result).__name__}")
+        logger.info(
+            "change_response for member %s on event %s: accept=%s result_keys=%s",
+            member_id, event_id, accept, list(result.keys()),
+        )
         return result
 
     async def find_member_id(self, kid_name: str) -> str | None:
@@ -535,12 +541,10 @@ async def handle_respond_to_event(
         return f"Aktivitet akseptert for {kid_name}."
     elif not accept and member_id in declined_ids:
         return f"Aktivitet avslått for {kid_name}."
-    elif accept and member_id not in accepted_ids:
-        logger.warning("Response may not have been saved for %s (member %s) on event %s. API returned: %s", kid_name, member_id, event_id, result)
-        return f"Svar sendt for {kid_name}, men kunne ikke bekrefte at det ble lagret. Sjekk Spond-appen."
     else:
         action = "akseptert" if accept else "avslått"
-        return f"Aktivitet {action} for {kid_name}."
+        logger.warning("Response may not have been saved for %s (member %s) on event %s. API returned: %s", kid_name, member_id, event_id, result)
+        return f"Svar sendt for {kid_name}, men kunne ikke bekrefte at det ble {action}. Sjekk Spond-appen."
 
 
 async def handle_search_events(

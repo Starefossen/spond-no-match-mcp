@@ -484,6 +484,30 @@ class TestRespondToEvent:
         )
         assert "ikke bekrefte" in result.lower() or "sjekk" in result.lower()
 
+    @pytest.mark.asyncio
+    async def test_decline_not_confirmed(self, service):
+        """Phantom decline: API returns empty declinedIds — must NOT claim success."""
+        service._client.change_response.return_value = {"acceptedIds": [], "declinedIds": []}
+        result = await handle_tool_call(
+            service,
+            "respond_to_event",
+            {"event_id": "EVT_KAMP_1", "kid_name": "Oliver", "accept": False},
+        )
+        assert "avslått" not in result.lower() or "ikke bekrefte" in result.lower()
+        assert "sjekk" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_decline_without_message(self, service):
+        """Decline without decline_message should still verify via declinedIds."""
+        service._client.change_response.return_value = {"acceptedIds": [], "declinedIds": ["MEMBER_OLIVER"]}
+        result = await handle_tool_call(
+            service,
+            "respond_to_event",
+            {"event_id": "EVT_KAMP_1", "kid_name": "Oliver", "accept": False},
+        )
+        assert "avslått" in result.lower()
+        assert "sjekk" not in result.lower()
+
 
 class TestSearchEvents:
     @pytest.mark.asyncio
