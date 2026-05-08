@@ -9,12 +9,14 @@ from conftest import (
     MOCK_EVENT_DETAIL,
     MOCK_EVENTS_FJORDVIK,
     MOCK_GROUPS,
+    MOCK_POSTS,
 )
 from server import (
     TOOLS,
     format_event_detail,
     format_event_summary,
     format_group_summary,
+    format_post_summary,
     fuzzy_match_group,
     handle_tool_call,
     norwegian_weekday,
@@ -544,6 +546,78 @@ class TestUnknownTool:
         assert "Ukjent verktøy" in result
 
 
+# --- Posts ---
+
+
+class TestFormatPostSummary:
+    def test_basic_post(self):
+        post = MOCK_POSTS[0]
+        group_map = {"GROUP_FJORDVIK": "Fjordvik FK G2013"}
+        result = format_post_summary(post, group_map)
+        assert "Trener" in result
+        assert "Fjordvik FK G2013" in result
+        assert "drikkebokser" in result
+        assert "1 kommentar" in result
+
+    def test_post_without_comments(self):
+        post = MOCK_POSTS[1]
+        result = format_post_summary(post, {})
+        assert "Trener" in result
+        assert "innendørs" in result
+        assert "kommentar" not in result
+
+    def test_post_with_multiple_comments(self):
+        post = MOCK_POSTS[2]
+        result = format_post_summary(post, {})
+        assert "2 kommentarer" in result
+
+    def test_long_body_truncated(self):
+        post = {**MOCK_POSTS[0], "body": "x" * 400}
+        result = format_post_summary(post, {})
+        assert len([l for l in result.split("\n") if "x" in l][0]) <= 300
+
+    def test_no_group_map(self):
+        result = format_post_summary(MOCK_POSTS[0], None)
+        assert "Trener" in result
+
+
+class TestGetPosts:
+    @pytest.mark.asyncio
+    async def test_all_posts(self, service):
+        result = await handle_tool_call(service, "get_posts", {})
+        assert "Innlegg (3 stk)" in result
+        assert "drikkebokser" in result
+        assert "innendørs" in result
+        assert "Velkommen" in result
+
+    @pytest.mark.asyncio
+    async def test_filter_by_group(self, service):
+        result = await handle_tool_call(service, "get_posts", {"group_name": "Fjordvik"})
+        assert "drikkebokser" in result
+        assert "Velkommen" not in result
+
+    @pytest.mark.asyncio
+    async def test_unknown_group(self, service):
+        result = await handle_tool_call(service, "get_posts", {"group_name": "Finnesikke"})
+        assert "Fant ingen gruppe" in result
+
+    @pytest.mark.asyncio
+    async def test_max_posts(self, service):
+        result = await handle_tool_call(service, "get_posts", {"max_posts": 1})
+        assert "Innlegg (1 stk)" in result
+
+    @pytest.mark.asyncio
+    async def test_posts_cached(self, service):
+        await service.get_posts()
+        await service.get_posts()
+        assert service._client.get_posts.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_posts_include_group_name(self, service):
+        result = await handle_tool_call(service, "get_posts", {})
+        assert "Fjordvik FK G2013" in result
+
+
 # --- Tool definitions ---
 
 
@@ -573,7 +647,7 @@ class TestToolDefinitions:
         assert "accept" in respond["inputSchema"]["required"]
 
     def test_expected_tool_count(self):
-        assert len(TOOLS) == 6
+        assert len(TOOLS) == 7
 
     def test_tool_names(self):
         names = {t["name"] for t in TOOLS}
@@ -584,6 +658,7 @@ class TestToolDefinitions:
             "get_attendance",
             "respond_to_event",
             "search_events",
+            "get_posts",
         }
 
 

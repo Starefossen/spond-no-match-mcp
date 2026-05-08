@@ -177,6 +177,50 @@ KIDS_CONFIG = [
     {"name": "Emma", "groups": ["Solvik IL 2017"]},
 ]
 
+MOCK_POSTS = [
+    {
+        "id": "POST_1",
+        "body": "Husk å ta med egne drikkebokser til kampen på lørdag. Vi har ikke engangskopper.",
+        "timestamp": "2026-02-22T10:30:00.000+00:00",
+        "groupId": "GROUP_FJORDVIK",
+        "createdByProfile": {
+            "id": "MEMBER_COACH",
+            "firstName": "Trener",
+            "lastName": "Hansen",
+        },
+        "comments": [
+            {"id": "COMMENT_1", "body": "Notert!", "timestamp": "2026-02-22T11:00:00.000+00:00"},
+        ],
+    },
+    {
+        "id": "POST_2",
+        "body": "Treningene flyttes innendørs fra neste uke pga. vær. Møt opp i hallen kl 17:00.",
+        "timestamp": "2026-02-21T14:00:00.000+00:00",
+        "groupId": "GROUP_FJORDVIK",
+        "createdByProfile": {
+            "id": "MEMBER_COACH",
+            "firstName": "Trener",
+            "lastName": "Hansen",
+        },
+        "comments": [],
+    },
+    {
+        "id": "POST_3",
+        "body": "Velkommen til ny sesong! Første trening er mandag.",
+        "timestamp": "2026-02-20T09:00:00.000+00:00",
+        "groupId": "GROUP_SOLVIK",
+        "createdByProfile": {
+            "id": "MEMBER_PARENT_B",
+            "firstName": "Ola",
+            "lastName": "Nordmann",
+        },
+        "comments": [
+            {"id": "COMMENT_2", "body": "Hurra!", "timestamp": "2026-02-20T09:30:00.000+00:00"},
+            {"id": "COMMENT_3", "body": "Gleder oss!", "timestamp": "2026-02-20T10:00:00.000+00:00"},
+        ],
+    },
+]
+
 
 @pytest.fixture
 def mock_spond_client():
@@ -196,6 +240,14 @@ def mock_spond_client():
     client.get_events = AsyncMock(side_effect=mock_get_events)
     client.get_event = AsyncMock(return_value=MOCK_EVENT_DETAIL)
     client.change_response = AsyncMock(return_value={"acceptedIds": ["MEMBER_OLIVER"], "declinedIds": []})
+
+    async def mock_get_posts(group_id=None, max_posts=20, include_comments=True):
+        posts = MOCK_POSTS
+        if group_id:
+            posts = [p for p in posts if p.get("groupId") == group_id]
+        return posts[:max_posts]
+
+    client.get_posts = AsyncMock(side_effect=mock_get_posts)
     client.clientsession = MagicMock()
     client.clientsession.close = AsyncMock()
     return client

@@ -140,6 +140,22 @@ class SpondService:
         if hasattr(self._client, "clientsession") and self._client.clientsession:
             await self._client.clientsession.close()
 
+    POSTS_TTL = 300.0  # 5 minutes
+
+    async def get_posts(
+        self, group_id: str | None = None, max_posts: int = 20
+    ) -> list[dict]:
+        cache_key = f"posts:{group_id or 'all'}:{max_posts}"
+        cached = self._get_cached(cache_key, self.POSTS_TTL)
+        if cached is not None:
+            return cached
+        posts = await self._client.get_posts(
+            group_id=group_id, max_posts=max_posts, include_comments=True
+        )
+        result = posts or []
+        self._set_cached(cache_key, result)
+        return result
+
 
 def fuzzy_match_group(group_name: str, configured_names: list[str]) -> bool:
     name_lower = group_name.lower()
@@ -250,6 +266,34 @@ def format_group_summary(group: dict) -> str:
     name = group.get("name", "Ukjent")
     members = group.get("members", [])
     return f"{name} ({len(members)} medlemmer)"
+
+
+def format_post_summary(post: dict, group_map: dict[str, str] | None = None) -> str:
+    body = (post.get("body") or "").strip()
+    if len(body) > 300:
+        body = body[:297] + "..."
+
+    ts = parse_timestamp(post.get("timestamp", ""))
+    author = post.get("createdByProfile", {}).get("firstName", "Ukjent")
+    group_id = post.get("groupId", "")
+    group_name = (group_map or {}).get(group_id, "")
+
+    lines = []
+    header = f"Fra {author}"
+    if group_name:
+        header += f" i {group_name}"
+    if ts:
+        header += f" — {norwegian_weekday(ts.weekday())} {ts.strftime('%d.%m kl. %H:%M')}"
+    lines.append(header)
+
+    if body:
+        lines.append(body)
+
+    comments = post.get("comments", [])
+    if comments:
+        lines.append(f"({len(comments)} kommentar{'er' if len(comments) != 1 else ''})")
+
+    return "\n".join(lines)
 
 
 # --- Tool definitions ---
@@ -381,6 +425,28 @@ TOOLS = [
                 },
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "get_posts",
+        "description": (
+            "Hent innlegg fra gruppeveggen i Spond. "
+            "Innlegg er beskjeder fra trenere/ledere til gruppa — "
+            "ikke chat-meldinger eller aktiviteter."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "group_name": {
+                    "type": "string",
+                    "description": "Filtrér på gruppenavn (delvis treff). Viser alle grupper hvis tom.",
+                },
+                "max_posts": {
+                    "type": "integer",
+                    "description": "Maks antall innlegg å hente (standard: 10).",
+                    "default": 10,
+                },
+            },
         },
     },
 ]
@@ -573,6 +639,31 @@ async def handle_search_events(
     return header + "\n\n" + "\n".join(lines).strip()
 
 
+async def handle_get_posts(
+    service: SpondService, group_name: str = "", max_posts: int = 10
+) -> str:
+    group_id = None
+    if group_name:
+        groups = await service.get_groups()
+        for g in groups:
+            if group_name.lower() in g.get("name", "").lower():
+                group_id = g["id"]
+                break
+        if not group_id:
+            return f"Fant ingen gruppe som matcher '{group_name}'."
+
+    posts = await service.get_posts(group_id=group_id, max_posts=max_posts)
+    if not posts:
+        return "Ingen innlegg funnet."
+
+    group_map = await service.get_group_map()
+    lines = [f"Innlegg ({len(posts)} stk):"]
+    for post in posts:
+        lines.append("")
+        lines.append(format_post_summary(post, group_map))
+    return "\n".join(lines)
+
+
 async def handle_tool_call(
     service: SpondService, name: str, arguments: dict | None
 ) -> str:
@@ -622,6 +713,12 @@ async def handle_tool_call(
             query=query,
             days=args.get("days", 30),
             from_days=args.get("from_days", 0),
+        )
+    elif name == "get_posts":
+        return await handle_get_posts(
+            service,
+            group_name=args.get("group_name", ""),
+            max_posts=args.get("max_posts", 10),
         )
     else:
         return f"Ukjent verktøy: {name}"
