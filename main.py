@@ -15,7 +15,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse
+from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Mount, Route
 
 from server import TOOLS, SpondService, handle_tool_call
@@ -88,6 +88,7 @@ async def handle_sse(request: Request):
         await mcp_server.run(
             read_stream, write_stream, mcp_server.create_initialization_options()
         )
+    return Response()
 
 
 async def health(request: Request):
