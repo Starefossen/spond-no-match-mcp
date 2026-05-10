@@ -30,13 +30,15 @@ class TestParseTimestamp:
     def test_iso_format(self):
         dt = parse_timestamp("2026-02-23T17:00:00.000+00:00")
         assert dt is not None
-        assert dt.hour == 17
+        # UTC+1 in February (CET) → 18:00 local
+        assert dt.hour == 18
         assert dt.day == 23
 
     def test_z_suffix(self):
         dt = parse_timestamp("2026-02-23T17:00:00Z")
         assert dt is not None
-        assert dt.hour == 17
+        # UTC+1 in February (CET) → 18:00 local
+        assert dt.hour == 18
 
     def test_empty(self):
         assert parse_timestamp("") is None
@@ -90,7 +92,8 @@ class TestFormatEventSummary:
         result = format_event_summary(MOCK_EVENTS_FJORDVIK[0])
         assert "Trening" in result
         assert "23.02" in result
-        assert "17:00-18:30" in result
+        # UTC 17:00-18:30 → CET 18:00-19:30
+        assert "18:00-19:30" in result
         assert "Fjordvik kunstgress" in result
 
     def test_with_family_rsvp(self):
@@ -131,7 +134,8 @@ class TestFormatEventSummary:
         result = format_event_summary(MOCK_EVENTS_FJORDVIK[1])
         assert "Svarfrist:" in result
         assert "24.02" in result
-        assert "12:00" in result
+        # UTC 12:00 → CET 13:00
+        assert "13:00" in result
 
     def test_no_rsvp_date(self):
         result = format_event_summary(MOCK_EVENTS_FJORDVIK[0])

@@ -4,12 +4,14 @@ import logging
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from spond.spond import Spond
 
 logger = logging.getLogger(__name__)
 
 WEEKDAYS_NO = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"]
+LOCAL_TZ = ZoneInfo("Europe/Oslo")
 
 
 class SpondService:
@@ -169,7 +171,8 @@ def parse_timestamp(ts: str) -> datetime | None:
     if not ts:
         return None
     try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        return dt.astimezone(LOCAL_TZ)
     except (ValueError, TypeError):
         return None
 
