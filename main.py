@@ -11,6 +11,7 @@ from mcp.server import Server
 from mcp.server.sse import SseServerTransport
 from mcp.types import TextContent, Tool
 from spond.spond import Spond
+from spond.base import _SpondBase
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -19,6 +20,25 @@ from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Mount, Route
 
 from server import TOOLS, SpondService, handle_tool_call
+
+
+# Patch Spond login for new auth2 endpoint (upstream fix pending: Olen/Spond#229)
+async def _patched_login(self) -> None:
+    from spond import AuthenticationError
+
+    login_url = f"{self.api_url}auth2/login"
+    data = {"email": self.username, "password": self.password}
+    async with self.clientsession.post(login_url, json=data) as r:
+        login_result = await r.json()
+        access = login_result.get("accessToken")
+        if access and isinstance(access, dict):
+            self.token = access.get("token")
+        if self.token is None:
+            err_msg = f"Login failed. Response received: {login_result}"
+            raise AuthenticationError(err_msg)
+
+
+_SpondBase.login = _patched_login
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("spond-mcp")
