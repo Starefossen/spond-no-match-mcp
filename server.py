@@ -94,9 +94,7 @@ class SpondService:
                 return kid.get("groups", [])
         return []
 
-    async def get_events(
-        self, days: int = 7, group_id: str | None = None, from_days: int = 0
-    ) -> list[dict]:
+    async def get_events(self, days: int = 7, group_id: str | None = None, from_days: int = 0) -> list[dict]:
         cache_key = f"events:{days}:{from_days}:{group_id or 'all'}"
         cached = self._get_cached(cache_key, self.EVENTS_TTL)
         if cached is not None:
@@ -115,9 +113,7 @@ class SpondService:
     async def get_event(self, event_id: str) -> dict:
         return await self._client.get_event(event_id)
 
-    async def change_response(
-        self, event_id: str, member_id: str, accept: bool, decline_message: str = ""
-    ) -> dict:
+    async def change_response(self, event_id: str, member_id: str, accept: bool, decline_message: str = "") -> dict:
         payload = {"accepted": "true"} if accept else {"accepted": "false"}
         if not accept and decline_message:
             payload["declineMessage"] = decline_message
@@ -127,7 +123,10 @@ class SpondService:
             raise ValueError(f"Unexpected API response type: {type(result).__name__}")
         logger.info(
             "change_response for member %s on event %s: accept=%s result_keys=%s",
-            member_id, event_id, accept, list(result.keys()),
+            member_id,
+            event_id,
+            accept,
+            list(result.keys()),
         )
         return result
 
@@ -144,19 +143,31 @@ class SpondService:
 
     POSTS_TTL = 300.0  # 5 minutes
 
-    async def get_posts(
-        self, group_id: str | None = None, max_posts: int = 20
-    ) -> list[dict]:
+    async def get_posts(self, group_id: str | None = None, max_posts: int = 20) -> list[dict]:
         cache_key = f"posts:{group_id or 'all'}:{max_posts}"
         cached = self._get_cached(cache_key, self.POSTS_TTL)
         if cached is not None:
             return cached
-        posts = await self._client.get_posts(
-            group_id=group_id, max_posts=max_posts, include_comments=True
-        )
+        posts = await self._client.get_posts(group_id=group_id, max_posts=max_posts, include_comments=True)
         result = posts or []
         self._set_cached(cache_key, result)
         return result
+
+    CHATS_TTL = 60.0  # 1 minute
+
+    async def get_chats(self, max_chats: int = 20) -> list[dict]:
+        cache_key = f"chats:{max_chats}"
+        cached = self._get_cached(cache_key, self.CHATS_TTL)
+        if cached is not None:
+            return cached
+        chats = await self._client.get_messages(max_chats=max_chats)
+        result = chats or []
+        self._set_cached(cache_key, result)
+        return result
+
+    async def get_chat_messages(self, chat_id: str, limit: int = 20) -> list[dict]:
+        messages = await self._client.get_msg_history(chat_id, limit=limit)
+        return messages or []
 
 
 def fuzzy_match_group(group_name: str, configured_names: list[str]) -> bool:
@@ -181,9 +192,7 @@ def norwegian_weekday(weekday: int) -> str:
     return WEEKDAYS_NO[weekday]
 
 
-def format_event_summary(
-    event: dict, family_members: dict[str, str] | None = None
-) -> str:
+def format_event_summary(event: dict, family_members: dict[str, str] | None = None) -> str:
     heading = event.get("heading", "Ukjent")
     start_dt = parse_timestamp(event.get("startTimestamp", ""))
     end_dt = parse_timestamp(event.get("endTimestamp", ""))
@@ -214,7 +223,9 @@ def format_event_summary(
 
     rsvp_dt = parse_timestamp(event.get("rsvpDate", ""))
     if rsvp_dt:
-        lines.append(f"Svarfrist: {norwegian_weekday(rsvp_dt.weekday())} {rsvp_dt.strftime('%d.%m')} kl. {rsvp_dt.strftime('%H:%M')}")
+        deadline = rsvp_dt.strftime("%d.%m")
+        time = rsvp_dt.strftime("%H:%M")
+        lines.append(f"Svarfrist: {norwegian_weekday(rsvp_dt.weekday())} {deadline} kl. {time}")
 
     if family_members:
         responses = event.get("responses", {})
@@ -271,6 +282,38 @@ def format_group_summary(group: dict) -> str:
     return f"{name} ({len(members)} medlemmer)"
 
 
+def format_chat_summary(chat: dict) -> str:
+    title = chat.get("title") or "Privat chat"
+    last_msg = chat.get("lastMessage", {})
+    last_text = (last_msg.get("body") or "").strip()
+    if len(last_text) > 50:
+        last_text = last_text[:47] + "..."
+
+    ts = parse_timestamp(last_msg.get("timestamp", ""))
+    ts_str = ts.strftime("%d.%m %H:%M") if ts else ""
+
+    sender = last_msg.get("sender", {}).get("firstName", "Ukjent")
+
+    line = f"{title}"
+    if ts_str:
+        line += f" ({ts_str})"
+    if last_text:
+        line += f": {sender}: {last_text}"
+
+    line += f" [id: {chat['id']}]"
+    return line
+
+
+def format_message_summary(msg: dict) -> str:
+    body = (msg.get("body") or "").strip()
+    sender = msg.get("sender", {}).get("firstName", "Ukjent")
+    ts = parse_timestamp(msg.get("timestamp", ""))
+    ts_str = ts.strftime("%d.%m %H:%M") if ts else ""
+
+    header = f"[{ts_str}] {sender}" if ts_str else sender
+    return f"{header}: {body}"
+
+
 def format_post_summary(post: dict, group_map: dict[str, str] | None = None) -> str:
     body = (post.get("body") or "").strip()
     if len(body) > 300:
@@ -313,8 +356,7 @@ TOOLS = [
     {
         "name": "get_upcoming_events",
         "description": (
-            "Hent kommende aktiviteter fra Spond. "
-            "Kan filtreres på barn eller gruppe. Standard: 7 dager frem."
+            "Hent kommende aktiviteter fra Spond. Kan filtreres på barn eller gruppe. Standard: 7 dager frem."
         ),
         "inputSchema": {
             "type": "object",
@@ -326,7 +368,9 @@ TOOLS = [
                 },
                 "from_days": {
                     "type": "integer",
-                    "description": "Start fra N dager frem i tid (standard: 0 = fra nå). F.eks. from_days=7, days=56 gir uke 2-9.",
+                    "description": (
+                        "Start fra N dager frem i tid (standard: 0 = fra nå). F.eks. from_days=7, days=56 gir uke 2-9."
+                    ),
                     "default": 0,
                 },
                 "group_name": {
@@ -356,10 +400,7 @@ TOOLS = [
     },
     {
         "name": "get_attendance",
-        "description": (
-            "Vis påmeldingsstatus for kommende aktiviteter. "
-            "Viser hvilke aktiviteter som mangler svar."
-        ),
+        "description": ("Vis påmeldingsstatus for kommende aktiviteter. Viser hvilke aktiviteter som mangler svar."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -374,7 +415,9 @@ TOOLS = [
                 },
                 "from_days": {
                     "type": "integer",
-                    "description": "Start fra N dager frem i tid (standard: 0 = fra nå). F.eks. from_days=7, days=56 gir uke 2-9.",
+                    "description": (
+                        "Start fra N dager frem i tid (standard: 0 = fra nå). F.eks. from_days=7, days=56 gir uke 2-9."
+                    ),
                     "default": 0,
                 },
             },
@@ -423,7 +466,9 @@ TOOLS = [
                 },
                 "from_days": {
                     "type": "integer",
-                    "description": "Start fra N dager frem i tid (standard: 0 = fra nå). F.eks. from_days=7, days=56 gir uke 2-9.",
+                    "description": (
+                        "Start fra N dager frem i tid (standard: 0 = fra nå). F.eks. from_days=7, days=56 gir uke 2-9."
+                    ),
                     "default": 0,
                 },
             },
@@ -450,6 +495,42 @@ TOOLS = [
                     "default": 10,
                 },
             },
+        },
+    },
+    {
+        "name": "get_chats",
+        "description": (
+            "Hent en oversikt over nylige chat-samtaler (både gruppechat og private meldinger). "
+            "Bruk id herfra for å hente selve meldingene i en chat med get_chat_messages."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "max_chats": {
+                    "type": "integer",
+                    "description": "Maks antall samtaler å hente (standard: 10).",
+                    "default": 10,
+                },
+            },
+        },
+    },
+    {
+        "name": "get_chat_messages",
+        "description": "Hent meldingshistorikken for en spesifikk chat-samtale.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "type": "string",
+                    "description": "ID for samtalen (fra get_chats).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maks antall meldinger å hente (standard: 20).",
+                    "default": 20,
+                },
+            },
+            "required": ["chat_id"],
         },
     },
 ]
@@ -522,9 +603,7 @@ async def handle_get_event_details(service: SpondService, event_id: str) -> str:
     return format_event_detail(event, family)
 
 
-async def handle_get_attendance(
-    service: SpondService, kid_name: str = "", days: int = 14, from_days: int = 0
-) -> str:
+async def handle_get_attendance(service: SpondService, kid_name: str = "", days: int = 14, from_days: int = 0) -> str:
     if kid_name:
         kid_group_names = service.get_kid_group_names(kid_name)
         if not kid_group_names:
@@ -612,13 +691,17 @@ async def handle_respond_to_event(
         return f"Aktivitet avslått for {kid_name}."
     else:
         action = "akseptert" if accept else "avslått"
-        logger.warning("Response may not have been saved for %s (member %s) on event %s. API returned: %s", kid_name, member_id, event_id, result)
+        logger.warning(
+            "Response may not have been saved for %s (member %s) on event %s. API returned: %s",
+            kid_name,
+            member_id,
+            event_id,
+            result,
+        )
         return f"Svar sendt for {kid_name}, men kunne ikke bekrefte at det ble {action}. Sjekk Spond-appen."
 
 
-async def handle_search_events(
-    service: SpondService, query: str, days: int = 30, from_days: int = 0
-) -> str:
+async def handle_search_events(service: SpondService, query: str, days: int = 30, from_days: int = 0) -> str:
     events = await service.get_events(days=days, from_days=from_days)
     query_lower = query.lower()
 
@@ -642,9 +725,7 @@ async def handle_search_events(
     return header + "\n\n" + "\n".join(lines).strip()
 
 
-async def handle_get_posts(
-    service: SpondService, group_name: str = "", max_posts: int = 10
-) -> str:
+async def handle_get_posts(service: SpondService, group_name: str = "", max_posts: int = 10) -> str:
     group_id = None
     if group_name:
         groups = await service.get_groups()
@@ -667,9 +748,30 @@ async def handle_get_posts(
     return "\n".join(lines)
 
 
-async def handle_tool_call(
-    service: SpondService, name: str, arguments: dict | None
-) -> str:
+async def handle_get_chats(service: SpondService, max_chats: int = 10) -> str:
+    chats = await service.get_chats(max_chats=max_chats)
+    if not chats:
+        return "Ingen chat-samtaler funnet."
+
+    lines = [f"Nylige samtaler ({len(chats)} stk):"]
+    for chat in chats:
+        lines.append(f"  • {format_chat_summary(chat)}")
+    return "\n".join(lines)
+
+
+async def handle_get_chat_messages(service: SpondService, chat_id: str, limit: int = 20) -> str:
+    messages = await service.get_chat_messages(chat_id, limit=limit)
+    if not messages:
+        return "Ingen meldinger funnet i denne samtalen."
+
+    lines = [f"Meldinger i samtalen ({len(messages)} stk):"]
+    # Usually we want newest at bottom for history
+    for msg in reversed(messages):
+        lines.append(format_message_summary(msg))
+    return "\n".join(lines)
+
+
+async def handle_tool_call(service: SpondService, name: str, arguments: dict | None) -> str:
     args = arguments or {}
 
     if name == "list_groups":
@@ -722,6 +824,20 @@ async def handle_tool_call(
             service,
             group_name=args.get("group_name", ""),
             max_posts=args.get("max_posts", 10),
+        )
+    elif name == "get_chats":
+        return await handle_get_chats(
+            service,
+            max_chats=args.get("max_chats", 10),
+        )
+    elif name == "get_chat_messages":
+        chat_id = args.get("chat_id", "")
+        if not chat_id:
+            return "chat_id er påkrevd."
+        return await handle_get_chat_messages(
+            service,
+            chat_id=chat_id,
+            limit=args.get("limit", 20),
         )
     else:
         return f"Ukjent verktøy: {name}"

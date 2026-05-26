@@ -59,6 +59,20 @@ description = "Auto-fix lint issues"
 depends = ["setup"]
 run = "ruff check --fix ."
 
+[tasks.fix]
+description = "Run all auto-fixers (ruff)"
+depends = ["setup"]
+run = "ruff check --fix . && ruff format ."
+
+[tasks.outdated]
+description = "Check for outdated dependencies"
+depends = ["setup"]
+run = "pip list --outdated"
+
+[tasks.check]
+description = "Run all quality checks"
+depends = ["test:unit", "lint"]
+
 # ================================
 # BUILD TASKS
 # ================================

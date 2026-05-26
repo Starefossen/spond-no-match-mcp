@@ -344,31 +344,23 @@ class TestGetUpcomingEvents:
 
     @pytest.mark.asyncio
     async def test_filter_by_kid(self, service):
-        result = await handle_tool_call(
-            service, "get_upcoming_events", {"kid_name": "Oliver"}
-        )
+        result = await handle_tool_call(service, "get_upcoming_events", {"kid_name": "Oliver"})
         assert "Oliver" in result
         assert "Seriekamp" in result
 
     @pytest.mark.asyncio
     async def test_filter_by_group(self, service):
-        result = await handle_tool_call(
-            service, "get_upcoming_events", {"group_name": "Solvik"}
-        )
+        result = await handle_tool_call(service, "get_upcoming_events", {"group_name": "Solvik"})
         assert "Nordvik minibane" in result
 
     @pytest.mark.asyncio
     async def test_unknown_kid(self, service):
-        result = await handle_tool_call(
-            service, "get_upcoming_events", {"kid_name": "Ukjent"}
-        )
+        result = await handle_tool_call(service, "get_upcoming_events", {"kid_name": "Ukjent"})
         assert "Ukjent barn" in result
 
     @pytest.mark.asyncio
     async def test_unknown_group(self, service):
-        result = await handle_tool_call(
-            service, "get_upcoming_events", {"group_name": "Nonexistent"}
-        )
+        result = await handle_tool_call(service, "get_upcoming_events", {"group_name": "Nonexistent"})
         assert "Fant ingen gruppe" in result
 
     @pytest.mark.asyncio
@@ -385,9 +377,7 @@ class TestGetUpcomingEvents:
 class TestGetEventDetails:
     @pytest.mark.asyncio
     async def test_returns_details(self, service):
-        result = await handle_tool_call(
-            service, "get_event_details", {"event_id": "EVT_KAMP_1"}
-        )
+        result = await handle_tool_call(service, "get_event_details", {"event_id": "EVT_KAMP_1"})
         assert "Seriekamp" in result
         assert "Havnes" in result
         assert "59.8765" in result
@@ -399,9 +389,7 @@ class TestGetEventDetails:
 
     @pytest.mark.asyncio
     async def test_includes_attendance_stats(self, service):
-        result = await handle_tool_call(
-            service, "get_event_details", {"event_id": "EVT_KAMP_1"}
-        )
+        result = await handle_tool_call(service, "get_event_details", {"event_id": "EVT_KAMP_1"})
         assert "Påmelding:" in result
 
 
@@ -434,9 +422,7 @@ class TestRespondToEvent:
         )
         assert "akseptert" in result
         assert "Oliver" in result
-        service._client.change_response.assert_awaited_once_with(
-            "EVT_KAMP_1", "MEMBER_OLIVER", {"accepted": "true"}
-        )
+        service._client.change_response.assert_awaited_once_with("EVT_KAMP_1", "MEMBER_OLIVER", {"accepted": "true"})
 
     @pytest.mark.asyncio
     async def test_decline_with_message(self, service):
@@ -578,7 +564,7 @@ class TestFormatPostSummary:
     def test_long_body_truncated(self):
         post = {**MOCK_POSTS[0], "body": "x" * 400}
         result = format_post_summary(post, {})
-        assert len([l for l in result.split("\n") if "x" in l][0]) <= 300
+        assert len([line for line in result.split("\n") if "x" in line][0]) <= 300
 
     def test_no_group_map(self):
         result = format_post_summary(MOCK_POSTS[0], None)
@@ -651,7 +637,7 @@ class TestToolDefinitions:
         assert "accept" in respond["inputSchema"]["required"]
 
     def test_expected_tool_count(self):
-        assert len(TOOLS) == 7
+        assert len(TOOLS) == 9
 
     def test_tool_names(self):
         names = {t["name"] for t in TOOLS}
@@ -663,6 +649,8 @@ class TestToolDefinitions:
             "respond_to_event",
             "search_events",
             "get_posts",
+            "get_chats",
+            "get_chat_messages",
         }
 
 
@@ -687,7 +675,9 @@ class TestBearerAuth:
     @pytest.fixture
     def client(self):
         from starlette.testclient import TestClient
+
         from main import app
+
         return TestClient(app, raise_server_exceptions=False)
 
     def test_health_no_auth_required(self, client):
@@ -729,7 +719,9 @@ class TestBearerAuthDisabled:
     @pytest.fixture
     def client(self):
         from starlette.testclient import TestClient
+
         from main import app
+
         return TestClient(app, raise_server_exceptions=False)
 
     def test_messages_allowed_without_token(self, client):
