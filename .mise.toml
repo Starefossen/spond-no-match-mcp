@@ -8,7 +8,7 @@ _.python.venv = { path = ".venv", create = true }
 
 [tasks.setup]
 description = "Install dependencies"
-run = "pip install -q -r requirements.txt -r requirements-dev.txt"
+run = "uv pip install -q -r requirements.txt -r requirements-dev.txt"
 
 [tasks.configure]
 description = "Create Spond credentials secret in cluster"
