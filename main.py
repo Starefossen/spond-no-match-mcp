@@ -34,8 +34,6 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path == "/health":
             return await call_next(request)
-        if not AUTH_TOKEN:
-            return await call_next(request)
         auth = request.headers.get("authorization", "")
         if not auth.startswith("Bearer ") or not hmac.compare_digest(auth[7:], AUTH_TOKEN):
             logger.warning(
@@ -115,10 +113,14 @@ app = Starlette(
 )
 
 
+def require_auth_token(token: str) -> str:
+    if not token:
+        raise SystemExit("MCP_AUTH_TOKEN is not set; refusing to start without auth")
+    return token
+
+
 if __name__ == "__main__":
+    require_auth_token(AUTH_TOKEN)
     port = int(os.environ.get("PORT", "8080"))
-    if AUTH_TOKEN:
-        logger.info("spond MCP server starting on :%d (auth enabled)", port)
-    else:
-        logger.warning("spond MCP server starting on :%d (NO AUTH — set MCP_AUTH_TOKEN)", port)
+    logger.info("spond MCP server starting on :%d (auth enabled)", port)
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info", http="h11")

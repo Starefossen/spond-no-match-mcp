@@ -784,8 +784,8 @@ class TestBearerAuth:
         assert resp.status_code != 401
 
 
-class TestBearerAuthDisabled:
-    """When MCP_AUTH_TOKEN is empty, all requests pass through."""
+class TestBearerAuthEmptyToken:
+    """An empty MCP_AUTH_TOKEN must never let requests through."""
 
     @pytest.fixture(autouse=True)
     def _patch_token(self, monkeypatch):
@@ -799,10 +799,18 @@ class TestBearerAuthDisabled:
 
         return TestClient(app, raise_server_exceptions=False)
 
-    def test_messages_allowed_without_token(self, client):
+    def test_messages_rejected(self, client):
         resp = client.post("/messages/")
-        assert resp.status_code != 401
+        assert resp.status_code == 401
 
     def test_health_still_works(self, client):
         resp = client.get("/health")
         assert resp.status_code == 200
+
+
+def test_require_auth_token_refuses_empty():
+    from main import require_auth_token
+
+    with pytest.raises(SystemExit):
+        require_auth_token("")
+    assert require_auth_token("t") == "t"
