@@ -465,6 +465,18 @@ class TestRespondToEvent:
             {"event_id": "EVT_KAMP_1", "kid_name": "Oliver", "accept": True},
         )
         assert "feil" in result.lower()
+        assert "Unauthorized" not in result
+
+    @pytest.mark.asyncio
+    async def test_exception_hides_upstream_text(self, service):
+        service._client.change_response.side_effect = RuntimeError("401 body={secret-token}")
+        result = await handle_tool_call(
+            service,
+            "respond_to_event",
+            {"event_id": "EVT_KAMP_1", "kid_name": "Oliver", "accept": True},
+        )
+        assert "secret-token" not in result
+        assert "Kunne ikke sende svar for Oliver" in result
 
     @pytest.mark.asyncio
     async def test_response_not_confirmed(self, service):

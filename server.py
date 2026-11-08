@@ -794,12 +794,12 @@ async def handle_respond_to_event(
     try:
         result = await service.change_response(event_id, member_id, accept, decline_message)
     except Exception as e:
-        logger.error("change_response failed for %s event %s: %s", kid_name, event_id, e)
-        return f"Feil ved svar for {kid_name}: {e}"
+        logger.error("change_response failed for %s event %s: %s", kid_name, event_id, type(e).__name__)
+        return f"Kunne ikke sende svar for {kid_name}. Prøv igjen senere eller bruk Spond-appen."
 
     if isinstance(result, dict) and "error" in result:
-        logger.error("Spond API error for %s event %s: %s", kid_name, event_id, result)
-        return f"Spond returnerte feil for {kid_name}: {result.get('error', result)}"
+        logger.error("Spond API error for %s event %s: %s", kid_name, event_id, str(result.get("error"))[:200])
+        return f"Spond ga feil ved svar for {kid_name}. Prøv igjen senere eller bruk Spond-appen."
 
     accepted_ids = set()
     declined_ids = set()

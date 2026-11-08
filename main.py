@@ -17,8 +17,8 @@ from mcp.types import TextContent, Tool
 from spond import AuthenticationError
 from spond.spond import Spond
 from starlette.applications import Starlette
+from starlette.datastructures import Headers
 from starlette.middleware import Middleware
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Mount, Route
@@ -30,21 +30,23 @@ logger = logging.getLogger("spond-mcp")
 
 AUTH_TOKEN = os.environ.get("MCP_AUTH_TOKEN", "")
 
-class BearerAuthMiddleware(BaseHTTPMiddleware):
-    """Validate Bearer token on all requests except /health."""
+class BearerAuthMiddleware:
+    """Pure ASGI bearer check (BaseHTTPMiddleware breaks SSE streaming); /health is open."""
 
-    async def dispatch(self, request: Request, call_next):
-        if request.url.path == "/health":
-            return await call_next(request)
-        auth = request.headers.get("authorization", "")
-        if not auth.startswith("Bearer ") or not hmac.compare_digest(auth[7:], AUTH_TOKEN):
-            logger.warning(
-                "Unauthorized request to %s from %s",
-                request.url.path,
-                request.client.host if request.client else "unknown",
-            )
-            return PlainTextResponse("unauthorized", status_code=401)
-        return await call_next(request)
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket") or scope["path"] == "/health":
+            return await self.app(scope, receive, send)
+        auth = Headers(scope=scope).get("authorization", "")
+        if auth.startswith("Bearer ") and AUTH_TOKEN and hmac.compare_digest(auth[7:].encode(), AUTH_TOKEN.encode()):
+            return await self.app(scope, receive, send)
+        client = scope.get("client")
+        logger.warning("Unauthorized request to %s from %s", scope["path"], client[0] if client else "unknown")
+        if scope["type"] == "websocket":
+            return await send({"type": "websocket.close", "code": 1008})
+        await PlainTextResponse("unauthorized", status_code=401)(scope, receive, send)
 
 
 class Unauthorized(Exception):
