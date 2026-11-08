@@ -924,7 +924,9 @@ async def handle_get_updates(
     group_map = await service.get_group_map()
     people = await service.get_people_map()
     # ponytail: /activities ignores paging params, so 100 is the reach; older items need get_posts/get_chats.
-    lines = []
+    lines: list[str] = []
+    seen: dict[tuple, int] = {}
+    counts: dict[tuple, int] = {}
     for act in await service.get_activities(100):
         ts = parse_timestamp(act.get("timestamp", ""))
         if ts and ts < cutoff:
@@ -933,9 +935,21 @@ async def handle_get_updates(
             continue
         if group_id and (act.get("group") or {}).get("id") != group_id:
             continue
-        lines.append(format_activity(act, group_map, people))
+        key = (
+            act.get("type"),
+            next(filter(None, ((act.get(k) or {}).get("id") for k in ("post", "spond", "chat"))), None),
+            (act.get("user") or {}).get("id") or (act.get("user") or {}).get("name"),
+        )
+        counts[key] = counts.get(key, 0) + 1
+        if key in seen:
+            continue
         if len(lines) >= limit:
             break
+        seen[key] = len(lines)
+        lines.append(format_activity(act, group_map, people))
+    for key, i in seen.items():
+        if counts[key] > 1:
+            lines[i] += f" (×{counts[key]})"
     if not lines:
         return f"Ingen nye hendelser de siste {since_hours} timene."
     return f"Nytt i Spond siste {since_hours} t ({len(lines)} stk, nyeste først):\n" + "\n".join(lines)

@@ -243,6 +243,9 @@ def mock_activities():
          "group": {"id": "GROUP_FJORDVIK"}, "user": {"id": "MEMBER_PARENT"}},
         {"id": "A3", "type": "schedule_event", "timestamp": ago(3), "spond": {"id": "EVENT_1"},
          "group": {"id": "GROUP_SOLVIK"}, "user": {"id": "MEMBER_PARENT_B"}},
+        {"id": "A3b", "type": "new_post", "timestamp": ago(3.5), "post": {"id": "POST_1"},
+         "group": {"id": "GROUP_FJORDVIK", "name": "Fjordvik FK G2013"},
+         "user": {"id": "PROFILE_COACH", "name": "Trener Hansen"}},
         {"id": "A4", "type": "chat_mention", "timestamp": ago(100), "chat": {"id": "CHAT_DM", "chatNum": 1},
          "user": {"id": "PROFILE_COACH"}},
     ]

@@ -662,6 +662,12 @@ class TestUpdates:
         assert "reaction" not in result
         assert "CHAT_DM" not in result
 
+    async def test_dedupes_same_kind_target_actor(self, service):
+        result = await handle_tool_call(service, "get_updates", {})
+        assert result.count("[post_id: POST_1]") == 1
+        assert "[post_id: POST_1] (×2)" in result
+        assert "(2 stk" in result
+
     async def test_since_hours(self, service):
         result = await handle_tool_call(service, "get_updates", {"since_hours": 200})
         assert "nevnt i chat" in result
