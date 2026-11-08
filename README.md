@@ -21,6 +21,15 @@ An [MCP](https://modelcontextprotocol.io/) server for managing kids' sports acti
 | `get_attendance`      | Show which events are missing responses for your kids           |
 | `respond_to_event`    | Accept or decline an event for a family member                  |
 | `search_events`       | Search upcoming events by text in title or description          |
+| `get_updates`         | What's new (the app's notification feed): posts, comments, mentions, event changes; filter by group and `since_hours` |
+| `get_posts`           | Group wall posts with comment counts                            |
+| `get_post_comments`   | One post with all comments and replies                          |
+| `get_chats`           | Recent chats (DM, group, club) with last message and unread flag |
+| `get_chat_messages`   | Message history for one chat (newest 10, oldest first)          |
+
+All tools except `respond_to_event` are read-only. Chat history, `get_updates` and post comments use
+Spond endpoints the `spond` library does not wrap (`GET {chat_url}/chats/{id}/messages`, `GET /core/v1/activities`);
+these are plain GETs and do not mark anything as read.
 
 ## Quick Start
 

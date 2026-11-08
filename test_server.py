@@ -543,15 +543,16 @@ class TestFormatPostSummary:
     def test_basic_post(self):
         post = MOCK_POSTS[0]
         group_map = {"GROUP_FJORDVIK": "Fjordvik FK G2013"}
-        result = format_post_summary(post, group_map)
+        result = format_post_summary(post, group_map, {"PROFILE_COACH": "Trener Hansen"})
         assert "Trener" in result
+        assert "Drikkeflasker" in result
         assert "Fjordvik FK G2013" in result
         assert "drikkebokser" in result
         assert "1 kommentar" in result
 
     def test_post_without_comments(self):
         post = MOCK_POSTS[1]
-        result = format_post_summary(post, {})
+        result = format_post_summary(post, {}, {"PROFILE_COACH": "Trener Hansen"})
         assert "Trener" in result
         assert "innendørs" in result
         assert "kommentar" not in result
@@ -566,9 +567,10 @@ class TestFormatPostSummary:
         result = format_post_summary(post, {})
         assert len([line for line in result.split("\n") if "x" in line][0]) <= 300
 
-    def test_no_group_map(self):
+    def test_no_maps(self):
         result = format_post_summary(MOCK_POSTS[0], None)
-        assert "Trener" in result
+        assert "Ukjent" in result
+        assert "[id: POST_1]" in result
 
 
 class TestGetPosts:
@@ -608,6 +610,71 @@ class TestGetPosts:
         assert "Fjordvik FK G2013" in result
 
 
+class TestPostComments:
+    async def test_threaded_comments(self, service):
+        result = await handle_tool_call(service, "get_post_comments", {"post_id": "POST_3"})
+        assert "Hurra!" in result
+        assert "↳" in result and "Trener Hansen: Gleder oss!" in result
+
+    async def test_no_comments(self, service):
+        result = await handle_tool_call(service, "get_post_comments", {"post_id": "POST_2"})
+        assert "Ingen kommentarer" in result
+
+    async def test_unknown_post(self, service):
+        result = await handle_tool_call(service, "get_post_comments", {"post_id": "NOPE"})
+        assert "Fant ikke innlegget" in result
+
+    async def test_missing_id(self, service):
+        assert "påkrevd" in await handle_tool_call(service, "get_post_comments", {})
+
+
+class TestChats:
+    async def test_chat_list(self, service):
+        result = await handle_tool_call(service, "get_chats", {})
+        assert "Trener Hansen, Ola Nordmann (privat" in result
+        assert "ulest" in result
+        assert "Trener Hansen: Kan du kjøre?" in result
+        assert "Foreldre G2013 (gruppe" in result
+
+    async def test_messages_oldest_first(self, service):
+        result = await handle_tool_call(service, "get_chat_messages", {"chat_id": "CHAT_DM"})
+        assert result.index("Hei!") < result.index("Kan du kjøre?")
+        assert "Ola Nordmann: Hei!" in result
+
+    async def test_limit_capped(self, service):
+        await handle_tool_call(service, "get_chat_messages", {"chat_id": "CHAT_DM", "limit": 500})
+        assert service._api_get.await_args.args[1] == {"max": "10"}
+
+    async def test_limit_keeps_newest(self, service):
+        result = await handle_tool_call(service, "get_chat_messages", {"chat_id": "CHAT_DM", "limit": 1})
+        assert "Kan du kjøre?" in result and "Hei!" not in result
+
+    async def test_api_error_propagates(self, service):
+        with pytest.raises(RuntimeError, match="404"):
+            await handle_tool_call(service, "get_chat_messages", {"chat_id": "NOPE"})
+
+
+class TestUpdates:
+    async def test_skips_reactions_and_old(self, service):
+        result = await handle_tool_call(service, "get_updates", {})
+        assert "nytt innlegg i Fjordvik FK G2013 av Trener Hansen [post_id: POST_1]" in result
+        assert "ny aktivitet i Solvik IL 2017 av Ola Nordmann [event_id: EVENT_1]" in result
+        assert "reaction" not in result
+        assert "CHAT_DM" not in result
+
+    async def test_since_hours(self, service):
+        result = await handle_tool_call(service, "get_updates", {"since_hours": 200})
+        assert "nevnt i chat" in result
+
+    async def test_group_filter(self, service):
+        result = await handle_tool_call(service, "get_updates", {"group_name": "Solvik"})
+        assert "EVENT_1" in result and "POST_1" not in result
+
+    async def test_nothing_new(self, service):
+        result = await handle_tool_call(service, "get_updates", {"since_hours": 0})
+        assert "Ingen nye hendelser" in result
+
+
 # --- Tool definitions ---
 
 
@@ -637,7 +704,7 @@ class TestToolDefinitions:
         assert "accept" in respond["inputSchema"]["required"]
 
     def test_expected_tool_count(self):
-        assert len(TOOLS) == 9
+        assert len(TOOLS) == 11
 
     def test_tool_names(self):
         names = {t["name"] for t in TOOLS}
@@ -651,6 +718,8 @@ class TestToolDefinitions:
             "get_posts",
             "get_chats",
             "get_chat_messages",
+            "get_post_comments",
+            "get_updates",
         }
 
 

@@ -28,6 +28,7 @@ MOCK_GROUPS = [
             },
             {
                 "id": "MEMBER_COACH",
+                "profile": {"id": "PROFILE_COACH"},
                 "firstName": "Trener",
                 "lastName": "Hansen",
                 "roles": ["admin"],
@@ -180,46 +181,71 @@ KIDS_CONFIG = [
 MOCK_POSTS = [
     {
         "id": "POST_1",
+        "title": "Drikkeflasker",
         "body": "Husk å ta med egne drikkebokser til kampen på lørdag. Vi har ikke engangskopper.",
-        "timestamp": "2026-02-22T10:30:00.000+00:00",
+        "timestamp": "2026-02-22T10:30:00.000Z",
         "groupId": "GROUP_FJORDVIK",
-        "createdByProfile": {
-            "id": "MEMBER_COACH",
-            "firstName": "Trener",
-            "lastName": "Hansen",
-        },
+        "ownerId": "PROFILE_COACH",
         "comments": [
-            {"id": "COMMENT_1", "body": "Notert!", "timestamp": "2026-02-22T11:00:00.000+00:00"},
+            {"id": "COMMENT_1", "fromProfileId": "MEMBER_PARENT", "text": "Notert!",
+             "timestamp": "2026-02-22T11:00:00.000Z", "children": []},
         ],
     },
     {
         "id": "POST_2",
         "body": "Treningene flyttes innendørs fra neste uke pga. vær. Møt opp i hallen kl 17:00.",
-        "timestamp": "2026-02-21T14:00:00.000+00:00",
+        "timestamp": "2026-02-21T14:00:00.000Z",
         "groupId": "GROUP_FJORDVIK",
-        "createdByProfile": {
-            "id": "MEMBER_COACH",
-            "firstName": "Trener",
-            "lastName": "Hansen",
-        },
-        "comments": [],
+        "ownerId": "PROFILE_COACH",
     },
     {
         "id": "POST_3",
         "body": "Velkommen til ny sesong! Første trening er mandag.",
-        "timestamp": "2026-02-20T09:00:00.000+00:00",
+        "timestamp": "2026-02-20T09:00:00.000Z",
         "groupId": "GROUP_SOLVIK",
-        "createdByProfile": {
-            "id": "MEMBER_PARENT_B",
-            "firstName": "Ola",
-            "lastName": "Nordmann",
-        },
+        "ownerId": "MEMBER_PARENT_B",
         "comments": [
-            {"id": "COMMENT_2", "body": "Hurra!", "timestamp": "2026-02-20T09:30:00.000+00:00"},
-            {"id": "COMMENT_3", "body": "Gleder oss!", "timestamp": "2026-02-20T10:00:00.000+00:00"},
+            {"id": "COMMENT_2", "fromProfileId": "MEMBER_PARENT", "text": "Hurra!",
+             "timestamp": "2026-02-20T09:30:00.000Z",
+             "children": [{"id": "COMMENT_3", "fromProfileId": "PROFILE_COACH", "text": "Gleder oss!",
+                           "timestamp": "2026-02-20T10:00:00.000Z"}]},
         ],
     },
 ]
+
+MOCK_CHATS = [
+    {"id": "CHAT_DM", "type": "DM", "participants": ["PROFILE_COACH", "MEMBER_PARENT"], "unread": True,
+     "message": {"chatId": "CHAT_DM", "msgNum": 2, "user": "PROFILE_COACH", "text": "Kan du kjøre?",
+                 "type": "TEXT", "timestamp": "2026-02-22T18:00:00.000Z"}},
+    {"id": "CHAT_GROUP", "name": "Foreldre G2013", "type": "GROUP", "participants": [], "unread": False,
+     "message": {"chatId": "CHAT_GROUP", "msgNum": 7, "type": "SPOND", "timestamp": "2026-02-21T08:00:00.000Z"}},
+]
+
+MOCK_MESSAGES = [
+    {"chatId": "CHAT_DM", "msgNum": 2, "user": "PROFILE_COACH", "text": "Kan du kjøre?", "type": "TEXT",
+     "timestamp": "2026-02-22T18:00:00.000Z"},
+    {"chatId": "CHAT_DM", "msgNum": 1, "user": "MEMBER_PARENT", "text": "Hei!", "type": "TEXT",
+     "timestamp": "2026-02-22T17:00:00.000Z"},
+]
+
+
+def mock_activities():
+    from datetime import UTC, datetime, timedelta
+
+    def ago(hours):
+        return (datetime.now(UTC) - timedelta(hours=hours)).isoformat().replace("+00:00", "Z")
+
+    return [
+        {"id": "A1", "type": "new_post", "timestamp": ago(1), "post": {"id": "POST_1"},
+         "group": {"id": "GROUP_FJORDVIK", "name": "Fjordvik FK G2013"},
+         "user": {"id": "PROFILE_COACH", "name": "Trener Hansen"}},
+        {"id": "A2", "type": "post_reaction", "timestamp": ago(2), "post": {"id": "POST_1"},
+         "group": {"id": "GROUP_FJORDVIK"}, "user": {"id": "MEMBER_PARENT"}},
+        {"id": "A3", "type": "schedule_event", "timestamp": ago(3), "spond": {"id": "EVENT_1"},
+         "group": {"id": "GROUP_SOLVIK"}, "user": {"id": "MEMBER_PARENT_B"}},
+        {"id": "A4", "type": "chat_mention", "timestamp": ago(100), "chat": {"id": "CHAT_DM", "chatNum": 1},
+         "user": {"id": "PROFILE_COACH"}},
+    ]
 
 
 @pytest.fixture
@@ -248,6 +274,7 @@ def mock_spond_client():
         return posts[:max_posts]
 
     client.get_posts = AsyncMock(side_effect=mock_get_posts)
+    client.get_messages = AsyncMock(return_value=MOCK_CHATS)
     client.clientsession = MagicMock()
     client.clientsession.close = AsyncMock()
     return client
@@ -256,7 +283,17 @@ def mock_spond_client():
 @pytest.fixture
 def service(mock_spond_client):
     """SpondService with mock client and kids config."""
-    return SpondService(client=mock_spond_client, kids_config=KIDS_CONFIG)
+    svc = SpondService(client=mock_spond_client, kids_config=KIDS_CONFIG)
+
+    async def api_get(path, params=None, chat=False):
+        if path == "activities":
+            return mock_activities()
+        if path == "chats/CHAT_DM/messages":
+            return MOCK_MESSAGES
+        raise RuntimeError(f"Spond svarte 404 på {path}")
+
+    svc._api_get = AsyncMock(side_effect=api_get)
+    return svc
 
 
 @pytest.fixture
