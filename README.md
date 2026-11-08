@@ -121,6 +121,27 @@ env:
       key: token
 ```
 
+## Login failures, password change and 2FA
+
+The server logs in once per pod and logs in again when Spond answers 401. If
+Spond rejects the login, the server stops trying for 15 minutes so it does not
+lock the account. During that time every tool returns
+"Innlogging mot Spond feilet (prøver igjen om N min)" without calling Spond, and
+one alert goes to the ntfy drift topic (`NTFY_TOPIC`, from Secret
+`mcp/ntfy-token` key `drift_topic`; create it once with
+`cd apps/vigilo && mise run ntfy-secret`).
+
+After changing the Spond password, or if login fails:
+
+1. Log in at spond.com in a browser with the same account. If Spond asks for a
+   2FA code or a new password, finish that there. The server cannot answer 2FA
+   prompts; use an account without 2FA.
+2. Update the Secret:
+   `kubectl -n mcp create secret generic spond-credentials --from-literal=username=... --from-literal=password=... --dry-run=client -o yaml | kubectl apply -f -`
+3. Restart so the backoff is cleared: `mise run deploy` (new revision).
+
+The server refuses to start without `SPOND_USERNAME` and `SPOND_PASSWORD`.
+
 ## Usage with mcporter
 
 [mcporter](https://github.com/steipete/mcporter) can connect to this server as a remote MCP tool:

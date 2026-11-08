@@ -41,6 +41,12 @@ spec:
             secretKeyRef:
               name: mcp-auth-token
               key: token
+        - name: NTFY_TOPIC
+          valueFrom:
+            secretKeyRef:
+              name: ntfy-token
+              key: drift_topic
+              optional: true
         - name: KIDS_CONFIG
           value: '<!-- FAMILY:KIDS_SPOND -->'
         resources:
@@ -76,3 +82,4 @@ spec:
             drop:
             - ALL
       serviceAccountName: default
+      automountServiceAccountToken: false

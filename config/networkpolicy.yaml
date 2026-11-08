@@ -63,3 +63,11 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+
+    # Alerts on Spond login failure
+    - toFQDNs:
+        - matchName: "ntfy.sh"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
