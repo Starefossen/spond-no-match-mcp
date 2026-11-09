@@ -74,7 +74,7 @@ def test_require(callers, caplog):
     caplog.set_level(logging.INFO, logger="mcpauth")
     assert call(a, "read", "Bearer " + VARDEN) == (200, b"ok", "varden")
     assert call(a, "read", "Bearer " + LEGACY)[2] == "legacy"
-    assert "caller=varden path=/sse remote=" in caplog.text
+    assert "caller=varden path='/sse' remote=" in caplog.text
     assert mcpauth.caller() == ""
 
 
@@ -94,7 +94,7 @@ def test_denied(callers, caplog, authz, query):
     a = mcpauth.load(callers)
     caplog.set_level(logging.INFO, logger="mcpauth")
     assert call(a, "read", authz, query) == (401, b"unauthorized", None)
-    assert "auth=denied path=/sse remote=10.0.0.7" in caplog.text
+    assert "auth=denied path='/sse' remote=10.0.0.7" in caplog.text
     assert VARDEN not in caplog.text and LEGACY not in caplog.text
 
 
@@ -144,4 +144,4 @@ def test_require_logs_xff(callers, caplog):
         pass
 
     asyncio.run(a.require("read", app)(scope, None, None))
-    assert "caller=varden path=/sse remote=10.0.0.7 xff=192.168.40.9,10.0.1.2\n" in caplog.text
+    assert "caller=varden path='/sse' remote=10.0.0.7 xff=192.168.40.9,10.0.1.2\n" in caplog.text

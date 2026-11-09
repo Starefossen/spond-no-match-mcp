@@ -347,7 +347,7 @@ class _Require:
             if name:
                 client = scope.get("client")
                 logger.info(
-                    "caller=%s path=%s remote=%s xff=%s",
+                    "caller=%s path=%r remote=%s xff=%s",
                     name,
                     path,
                     client[0] if client else "unknown",
@@ -359,7 +359,7 @@ class _Require:
                 finally:
                     _caller.reset(token)
         client = scope.get("client")
-        logger.warning("auth=denied path=%s remote=%s", path, client[0] if client else "unknown")
+        logger.warning("auth=denied path=%r remote=%s", path, client[0] if client else "unknown")
         if scope["type"] == "websocket":
             return await send({"type": "websocket.close", "code": 1008})
         await send(

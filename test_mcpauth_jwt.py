@@ -120,11 +120,26 @@ def test_accepts(tmp_path, jwks, caplog):
     caplog.set_level(logging.INFO, logger="mcpauth")
     tok = sign(k, HDR, claims())
     assert call(a, "read", "Bearer " + tok) == (200, b"ok", "varden")
-    assert "caller=varden path=/sse" in caplog.text and tok not in caplog.text
+    assert "caller=varden path='/sse' remote=" in caplog.text and tok not in caplog.text
     assert call(a, "read", "Bearer " + LEGACY)[2] == "legacy"
     cl = claims(sub="unmapped-uuid", aud=["other", AUD], scope="groups openid extra")
     assert call(a, "read", "Bearer " + sign(k, {**HDR, "typ": "AT+JWT"}, cl))[0] == 401
     assert call(a, "read", "Bearer " + sign(k, {**HDR, "typ": "AT+JWT"}, claims(aud=["other", AUD])))[0] == 200
+
+
+def test_log_path_cannot_forge_lines(tmp_path, jwks, caplog):
+    a, k = setup(tmp_path, jwks, static=True)
+    caplog.set_level(logging.INFO, logger="mcpauth")
+    authz = ("Bearer " + sign(k, HDR, claims())).encode()
+    scope = {"type": "http", "path": "/x\ncaller=evil-jwt", "headers": [(b"authorization", authz)]}
+
+    async def app(scope, receive, send):
+        pass
+
+    import asyncio
+
+    asyncio.run(a.require("read", app)(scope, None, None))
+    assert "\n" not in caplog.records[-1].getMessage() and "path='/x\\ncaller=evil-jwt'" in caplog.text
 
 
 def reject_cases(k):
