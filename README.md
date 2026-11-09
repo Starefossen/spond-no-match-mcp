@@ -74,7 +74,7 @@ docker run -p 8080:8080 \
 | `SPOND_USERNAME` | Yes      |                         | Spond account email                               |
 | `SPOND_PASSWORD` | Yes      |                         | Spond account password                            |
 | `KIDS_CONFIG`    | No       | `[]`                    | JSON array mapping kid names to Spond group names |
-| `MCP_AUTH_TOKEN` | No       |                         | Bearer token for authentication (see below)       |
+| `MCP_CALLERS_DIR` | Yes     |                         | Directory of per-caller tokens (see below)        |
 | `PORT`           | No       | `8080`                  | Server port                                       |
 | `BASE_URL`       | No       | `http://localhost:8080` | Public URL for SSE endpoint construction          |
 
@@ -93,33 +93,15 @@ Without `KIDS_CONFIG`, the server still works but can't filter by kid or show pe
 
 ## Authentication
 
-This server handles sensitive family data and supports optional bearer token authentication. When `MCP_AUTH_TOKEN` is set, all requests (except `/health`) must include an `Authorization: Bearer <token>` header.
-
-- `/health` is always exempt (required for Knative/K8s health probes)
-- When `MCP_AUTH_TOKEN` is empty or unset, auth is disabled (backward compatible)
-- Uses constant-time comparison (`hmac.compare_digest`) to prevent timing attacks
+Per-caller bearer auth via `mcpauth.py` (mirror of github.com/starefossen/mcpauth). Tokens are files in `$MCP_CALLERS_DIR/read/<caller>`; the server refuses to start without them. Only the `Authorization: Bearer` header is accepted; `/health` is open. Each accepted request logs `caller=<name>`.
 
 ```bash
-# Run with auth enabled
-MCP_AUTH_TOKEN=my-secret-token \
-SPOND_USERNAME=you@example.com \
-SPOND_PASSWORD=your-password \
-python main.py
-
-# Test with auth
-curl -H "Authorization: Bearer my-secret-token" http://localhost:8080/sse
+mkdir -p /tmp/callers/read && openssl rand -hex 24 > /tmp/callers/read/me
+MCP_CALLERS_DIR=/tmp/callers SPOND_USERNAME=you@example.com SPOND_PASSWORD=pw python main.py
+curl -H "Authorization: Bearer $(cat /tmp/callers/read/me)" http://localhost:8080/sse
 ```
 
-For Kubernetes deployments, store the token as a Secret and reference it in your service manifest:
-
-```yaml
-env:
-- name: MCP_AUTH_TOKEN
-  valueFrom:
-    secretKeyRef:
-      name: mcp-auth-token
-      key: token
-```
+In Kubernetes the callers are projected from Secret `mcp-auth-token` (see `config/knative-service.yaml`).
 
 ## Login failures, password change and 2FA
 
@@ -212,7 +194,7 @@ ruff check .
 
 This server is designed to run on Knative with scale-to-zero. See [knative-service.yaml](config/knative-service.yaml) and [.mise.toml](.mise.toml) for deployment tasks.
 
-Authentication is enabled via `MCP_AUTH_TOKEN` from a K8s Secret (`mcp-auth-token` in `mcp` namespace).
+Callers are projected from Secret `mcp-auth-token` in the `mcp` namespace.
 
 ```bash
 # Build and deploy (requires mise + Docker + kubectl)

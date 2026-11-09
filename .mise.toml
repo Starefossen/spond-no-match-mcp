@@ -136,7 +136,7 @@ run = "../../scripts/app-deploy.sh test ${APP_NAME} ${NAMESPACE}"
 description = "Run comprehensive MCP protocol tests (fetches auth token from K8s)"
 raw = true
 run = """
-export MCP_AUTH_TOKEN=$(kubectl get secret mcp-auth-token -n mcp -o jsonpath='{.data.token}' | base64 -d)
+export MCP_AUTH_TOKEN=$(kubectl get secret mcp-auth-token -n mcp -o jsonpath="{.data.${MCP_CALLER:-operator}}" | base64 -d)
 ./scripts/test-mcp.sh
 """
 

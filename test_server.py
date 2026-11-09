@@ -754,18 +754,22 @@ class TestServiceLifecycle:
 # --- Bearer auth middleware ---
 
 
-class TestBearerAuth:
-    @pytest.fixture(autouse=True)
-    def _patch_token(self, monkeypatch):
-        monkeypatch.setattr("main.AUTH_TOKEN", "test-secret-token")
+@pytest.fixture
+def callers_dir(tmp_path):
+    (tmp_path / "read").mkdir()
+    (tmp_path / "read" / "varden").write_text("test-secret-token-xyz\n")
+    return tmp_path
 
+
+class TestBearerAuth:
     @pytest.fixture
-    def client(self):
+    def client(self, callers_dir):
         from starlette.testclient import TestClient
 
-        from main import app
+        import mcpauth
+        from main import build_app
 
-        return TestClient(app, raise_server_exceptions=False)
+        return TestClient(build_app(mcpauth.load(str(callers_dir))), raise_server_exceptions=False)
 
     def test_health_no_auth_required(self, client):
         resp = client.get("/health")
@@ -781,6 +785,9 @@ class TestBearerAuth:
         resp = client.get("/sse", headers={"Authorization": "Bearer wrong-token"})
         assert resp.status_code == 401
 
+    def test_sse_rejected_with_query_token(self, client):
+        assert client.get("/sse?token=test-secret-token-xyz").status_code == 401
+
     def test_sse_rejected_with_malformed_header(self, client):
         resp = client.get("/sse", headers={"Authorization": "Basic dXNlcjpwYXNz"})
         assert resp.status_code == 401
@@ -790,39 +797,14 @@ class TestBearerAuth:
         assert resp.status_code == 401
 
     def test_accepted_with_valid_token(self, client):
-        # Test that valid token passes through middleware (not 401)
-        # Use /messages/ since /sse is a long-lived streaming endpoint
-        resp = client.post("/messages/", headers={"Authorization": "Bearer test-secret-token"})
+        resp = client.post("/messages/", headers={"Authorization": "Bearer test-secret-token-xyz"})
         assert resp.status_code != 401
 
 
-class TestBearerAuthEmptyToken:
-    """An empty MCP_AUTH_TOKEN must never let requests through."""
+def test_load_refuses_missing_config(tmp_path):
+    import mcpauth
 
-    @pytest.fixture(autouse=True)
-    def _patch_token(self, monkeypatch):
-        monkeypatch.setattr("main.AUTH_TOKEN", "")
-
-    @pytest.fixture
-    def client(self):
-        from starlette.testclient import TestClient
-
-        from main import app
-
-        return TestClient(app, raise_server_exceptions=False)
-
-    def test_messages_rejected(self, client):
-        resp = client.post("/messages/")
-        assert resp.status_code == 401
-
-    def test_health_still_works(self, client):
-        resp = client.get("/health")
-        assert resp.status_code == 200
-
-
-def test_require_auth_token_refuses_empty():
-    from main import require_auth_token
-
-    with pytest.raises(SystemExit):
-        require_auth_token("")
-    assert require_auth_token("t") == "t"
+    with pytest.raises(ValueError):
+        mcpauth.load(None)
+    with pytest.raises(ValueError):
+        mcpauth.load(str(tmp_path))

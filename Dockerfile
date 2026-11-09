@@ -8,7 +8,7 @@ FROM python:3.12-slim
 COPY --from=builder /install /usr/local
 RUN python -m compileall -q /usr/local/lib/python3.12
 WORKDIR /app
-COPY main.py server.py ./
+COPY main.py server.py mcpauth.py ./
 RUN python -m compileall -q /app
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1

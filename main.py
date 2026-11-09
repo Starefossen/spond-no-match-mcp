@@ -1,7 +1,6 @@
 """Spond MCP server entry point — Starlette app with health + SSE endpoints."""
 
 import asyncio
-import hmac
 import json
 import logging
 import os
@@ -17,37 +16,15 @@ from mcp.types import TextContent, Tool
 from spond import AuthenticationError
 from spond.spond import Spond
 from starlette.applications import Starlette
-from starlette.datastructures import Headers
-from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Mount, Route
 
+import mcpauth
 from server import TOOLS, SpondService, handle_tool_call
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("spond-mcp")
-
-AUTH_TOKEN = os.environ.get("MCP_AUTH_TOKEN", "")
-
-class BearerAuthMiddleware:
-    """Pure ASGI bearer check (BaseHTTPMiddleware breaks SSE streaming); /health is open."""
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] not in ("http", "websocket") or scope["path"] == "/health":
-            return await self.app(scope, receive, send)
-        auth = Headers(scope=scope).get("authorization", "")
-        if auth.startswith("Bearer ") and AUTH_TOKEN and hmac.compare_digest(auth[7:].encode(), AUTH_TOKEN.encode()):
-            return await self.app(scope, receive, send)
-        client = scope.get("client")
-        logger.warning("Unauthorized request to %s from %s", scope["path"], client[0] if client else "unknown")
-        if scope["type"] == "websocket":
-            return await send({"type": "websocket.close", "code": 1008})
-        await PlainTextResponse("unauthorized", status_code=401)(scope, receive, send)
-
 
 class Unauthorized(Exception):
     pass
@@ -186,21 +163,17 @@ async def lifespan(app):
     await auth._drop()
 
 
-app = Starlette(
-    routes=[
-        Route("/health", health),
-        Route("/sse", handle_sse),
-        Mount("/messages/", app=sse.handle_post_message),
-    ],
-    middleware=[Middleware(BearerAuthMiddleware)],
-    lifespan=lifespan,
-)
-
-
-def require_auth_token(token: str) -> str:
-    if not token:
-        raise SystemExit("MCP_AUTH_TOKEN is not set; refusing to start without auth")
-    return token
+def build_app(callers: mcpauth.Auth) -> Starlette:
+    return Starlette(
+        routes=[
+            Route("/health", health),
+            Mount("/", app=callers.require("read", Starlette(routes=[
+                Route("/sse", handle_sse),
+                Mount("/messages/", app=sse.handle_post_message),
+            ]))),
+        ],
+        lifespan=lifespan,
+    )
 
 
 def require_credentials() -> None:
@@ -209,8 +182,13 @@ def require_credentials() -> None:
 
 
 if __name__ == "__main__":
-    require_auth_token(AUTH_TOKEN)
+    try:
+        callers = mcpauth.load(os.environ.get("MCP_CALLERS_DIR"))
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"{e}; refusing to start without auth") from None
+    if not callers.has("read"):
+        raise SystemExit("mcpauth: no read group; refusing to start")
     require_credentials()
     port = int(os.environ.get("PORT", "8080"))
     logger.info("spond MCP server starting on :%d (auth enabled)", port)
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info", http="h11")
+    uvicorn.run(build_app(callers), host="0.0.0.0", port=port, log_level="info", http="h11")

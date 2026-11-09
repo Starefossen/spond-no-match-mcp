@@ -36,11 +36,8 @@ spec:
             secretKeyRef:
               name: spond-credentials
               key: password
-        - name: MCP_AUTH_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: mcp-auth-token
-              key: token
+        - name: MCP_CALLERS_DIR
+          value: /var/run/mcp-callers
         - name: NTFY_TOPIC
           valueFrom:
             secretKeyRef:
@@ -49,6 +46,10 @@ spec:
               optional: true
         - name: KIDS_CONFIG
           value: '<!-- FAMILY:KIDS_SPOND -->'
+        volumeMounts:
+        - name: mcp-callers
+          mountPath: /var/run/mcp-callers
+          readOnly: true
         resources:
           requests:
             memory: "32Mi"
@@ -81,5 +82,16 @@ spec:
           capabilities:
             drop:
             - ALL
+      volumes:
+      - name: mcp-callers
+        secret:
+          secretName: mcp-auth-token
+          items:
+          - key: varden
+            path: read/varden
+          - key: token
+            path: read/legacy
+          - key: operator
+            path: read/operator
       serviceAccountName: default
       automountServiceAccountToken: false
