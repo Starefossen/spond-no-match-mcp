@@ -1,4 +1,4 @@
-"""Per-caller bearer auth for MCP servers. mirror of libs/mcpauth (keep in sync).
+"""Per-caller bearer auth for MCP servers. mirror of github.com/starefossen/mcpauth (keep in sync).
 
 Tokens live in <MCP_CALLERS_DIR>/<group>/<caller>. load() fails closed; Require
 is a pure ASGI wrapper (BaseHTTPMiddleware breaks SSE). Mount /health outside it.
