@@ -109,3 +109,11 @@ def test_compare_all_no_early_exit(callers, monkeypatch):
         n = 0
         v.verify(tok.encode())
         assert n == 2
+
+
+def test_duplicate_token_rejected(tmp_path):
+    write(tmp_path / "g/a", VARDEN)
+    write(tmp_path / "g/b", VARDEN + "\n")
+    with pytest.raises(ValueError, match="a and b") as e:
+        mcpauth.load(str(tmp_path))
+    assert VARDEN not in str(e.value)

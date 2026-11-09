@@ -2,6 +2,8 @@
 
 Tokens live in <MCP_CALLERS_DIR>/<group>/<caller>. load() fails closed; Require
 is a pure ASGI wrapper (BaseHTTPMiddleware breaks SSE). Mount /health outside it.
+Tokens load once at start: rotate by rolling a new revision / restarting.
+Under the Python mcp SDK, caller() reflects the SSE opener, not each message.
 """
 
 import contextvars
@@ -45,6 +47,9 @@ def _load_group(gdir: str) -> _StaticVerifier:
             continue
         if len(tok) < MIN_TOKEN_LEN:
             raise ValueError(f"caller {name}: token shorter than {MIN_TOKEN_LEN} bytes")
+        for other, t in tokens.items():
+            if hmac.compare_digest(hashlib.sha256(t).digest(), hashlib.sha256(tok).digest()):
+                raise ValueError(f"callers {other} and {name} share a token")
         tokens[name] = tok
     if not tokens:
         raise ValueError("no non-empty token files")
