@@ -84,12 +84,19 @@ spec:
             - ALL
       volumes:
       - name: mcp-callers
-        secret:
-          secretName: mcp-auth-token
-          items:
-          - key: varden
-            path: read/varden
-          - key: operator
-            path: read/operator
+        projected:
+          sources:
+          - secret:
+              name: mcp-auth-token
+              items:
+              - key: varden
+                path: read/varden
+              - key: operator
+                path: read/operator
+          - configMap:
+              name: spond-jwks
+              items:
+              - key: read.json
+                path: read/jwks.json
       serviceAccountName: default
       automountServiceAccountToken: false

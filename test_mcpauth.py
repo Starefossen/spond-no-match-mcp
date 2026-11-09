@@ -95,7 +95,7 @@ def test_unknown_group_denied(callers):
 
 
 def test_compare_all_no_early_exit(callers, monkeypatch):
-    v = mcpauth.load(callers)._groups["read"]
+    v = mcpauth.load(callers)._groups["read"].static
     n = 0
     real = mcpauth.hmac.compare_digest
 

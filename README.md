@@ -103,6 +103,8 @@ curl -H "Authorization: Bearer $(cat /tmp/callers/read/me)" http://localhost:808
 
 In Kubernetes the callers are projected from Secret `mcp-auth-token` (see `config/knative-service.yaml`).
 
+`read/jwks.json` (ConfigMap `spond-jwks`, `config/spond-jwks.yaml`) also enables Kanidm JWTs, same rules as mcpauth v0.3.0: ES256 `at+jwt` only, `iss`/`aud`/`exp`/`nbf` with 60 s skew, required scope, and `callers` as a `sub` allowlist (unknown `sub` gets 401). The JWKS loads in the background over HTTPS without redirects, refreshes hourly and on an unknown `kid` at most once a minute. Static tokens are tried first and keep working while Kanidm is down.
+
 ## Login failures, password change and 2FA
 
 The server logs in once per pod and logs in again when Spond answers 401. If
@@ -183,7 +185,7 @@ spond-mcp (:8080)
 # Install dev dependencies
 pip install -r requirements.txt -r requirements-dev.txt
 
-# Run tests (87 tests, including auth middleware tests)
+# Run tests (164 tests, including auth middleware and JWT tests)
 pytest -v
 
 # Lint

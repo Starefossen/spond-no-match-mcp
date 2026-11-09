@@ -71,3 +71,13 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+
+    # Kanidm JWKS for mcpauth JWTs (RFC-019 phase 2); LB 192.168.40.45:443 DNATs to pod 8443
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kanidm
+            app: kanidm
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP

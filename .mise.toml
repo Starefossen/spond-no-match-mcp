@@ -91,6 +91,7 @@ raw = true
 run = """
 kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f config/networkpolicy.yaml
+kubectl apply -f config/spond-jwks.yaml
 ../../scripts/app-deploy.sh deploy ${APP_NAME} ${NAMESPACE}
 """
 
@@ -101,6 +102,7 @@ depends = ["build"]
 run = """
 kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f config/networkpolicy.yaml
+kubectl apply -f config/spond-jwks.yaml
 ../../scripts/app-deploy.sh deploy ${APP_NAME} ${NAMESPACE}
 """
 

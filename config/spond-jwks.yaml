@@ -1,0 +1,14 @@
+# mcpauth JWT config for group "read" (RFC-019 phase 2). Not secret: issuer, JWKS URL, caller UUIDs.
+# Per server: each MCP server has its own ConfigMap (<app>-jwks) so callers are allowed per server.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spond-jwks
+  namespace: mcp
+data:
+  read.json: |
+    {"issuer": "https://id.flaatten.org/oauth2/openid/mcp",
+     "audience": "mcp",
+     "jwks_url": "https://id.flaatten.org/oauth2/openid/mcp/public_key.jwk",
+     "required_scope": ["groups"],
+     "callers": {"071d4ebd-89ba-445b-80a6-c1bfd5e756ba": "varden-jwt"}}
