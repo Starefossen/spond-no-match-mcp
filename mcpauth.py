@@ -320,6 +320,14 @@ def load(directory: str | None) -> Auth:
     return Auth(groups)
 
 
+def _xff(scope) -> str:
+    for k, v in scope.get("headers", []):
+        if k.lower() == b"x-forwarded-for":
+            ok = "0123456789abcdefABCDEF.:,"
+            return "".join(c for c in v.decode("latin-1") if c in ok)[:200] or "-"
+    return "-"
+
+
 class _Require:
     def __init__(self, verifier: _Group | None, app):
         self.verifier = verifier
@@ -337,7 +345,14 @@ class _Require:
         if self.verifier and auth.startswith(b"Bearer "):
             name = await self.verifier.verify(auth[7:])
             if name:
-                logger.info("caller=%s path=%s", name, path)
+                client = scope.get("client")
+                logger.info(
+                    "caller=%s path=%s remote=%s xff=%s",
+                    name,
+                    path,
+                    client[0] if client else "unknown",
+                    _xff(scope),
+                )
                 token = _caller.set(name)
                 try:
                     return await self.app(scope, receive, send)

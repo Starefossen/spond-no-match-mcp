@@ -74,7 +74,7 @@ def test_require(callers, caplog):
     caplog.set_level(logging.INFO, logger="mcpauth")
     assert call(a, "read", "Bearer " + VARDEN) == (200, b"ok", "varden")
     assert call(a, "read", "Bearer " + LEGACY)[2] == "legacy"
-    assert "caller=varden path=/sse" in caplog.text
+    assert "caller=varden path=/sse remote=" in caplog.text
     assert mcpauth.caller() == ""
 
 
@@ -125,3 +125,23 @@ def test_duplicate_token_rejected(tmp_path):
     with pytest.raises(ValueError, match="a and b") as e:
         mcpauth.load(str(tmp_path))
     assert VARDEN not in str(e.value)
+
+
+def test_require_logs_xff(callers, caplog):
+    a = mcpauth.load(callers)
+    caplog.set_level(logging.INFO, logger="mcpauth")
+    scope = {
+        "type": "http",
+        "path": "/sse",
+        "client": ("10.0.0.7", 1),
+        "headers": [
+            (b"authorization", ("Bearer " + VARDEN).encode()),
+            (b"x-forwarded-for", b"192.168.40.9, 10.0.1.2\nx=y"),
+        ],
+    }
+
+    async def app(scope, receive, send):
+        pass
+
+    asyncio.run(a.require("read", app)(scope, None, None))
+    assert "caller=varden path=/sse remote=10.0.0.7 xff=192.168.40.9,10.0.1.2\n" in caplog.text
