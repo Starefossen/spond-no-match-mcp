@@ -11,4 +11,5 @@ data:
      "audience": "mcp",
      "jwks_url": "https://id.flaatten.org/oauth2/openid/mcp/public_key.jwk",
      "required_scope": ["groups"],
-     "callers": {"071d4ebd-89ba-445b-80a6-c1bfd5e756ba": "varden-jwt"}}
+     "callers": {"071d4ebd-89ba-445b-80a6-c1bfd5e756ba": "varden-jwt",
+                  "00e6aa3b-4146-4ea1-9a81-0498eb2585d6": "operator-jwt"}}
