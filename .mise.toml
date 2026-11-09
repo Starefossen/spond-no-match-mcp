@@ -34,7 +34,7 @@ echo ""
 kubectl create secret generic spond-credentials -n mcp \
   --from-literal=username="$username" \
   --from-literal=password="$password" \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f -
 
 echo "Secret spond-credentials created in mcp namespace."
 '''
