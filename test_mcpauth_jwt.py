@@ -18,8 +18,13 @@ ISS = "https://id.example.org/oauth2/openid/mcp-read"
 AUD = "mcp-read"
 URL = "https://jwks.example.org/keys"
 HDR = {"alg": "ES256", "kid": "k1", "typ": "at+jwt"}
-BASE = {"issuer": ISS, "audience": AUD, "jwks_url": URL, "required_scope": ["groups"],
-        "callers": {"0b0e5c4e-uuid": "varden"}}
+BASE = {
+    "issuer": ISS,
+    "audience": AUD,
+    "jwks_url": URL,
+    "required_scope": ["groups"],
+    "callers": {"0b0e5c4e-uuid": "varden"},
+}
 
 
 def b64(b):
@@ -47,8 +52,17 @@ class JWKS:
         ks = []
         for kid, k in self.keys.items():
             n = k.public_key().public_numbers()
-            ks.append({"kty": "EC", "crv": "P-256", "kid": kid, "use": "sig", "alg": "ES256",
-                       "x": b64(n.x.to_bytes(32, "big")), "y": b64(n.y.to_bytes(32, "big"))})
+            ks.append(
+                {
+                    "kty": "EC",
+                    "crv": "P-256",
+                    "kid": kid,
+                    "use": "sig",
+                    "alg": "ES256",
+                    "x": b64(n.x.to_bytes(32, "big")),
+                    "y": b64(n.y.to_bytes(32, "big")),
+                }
+            )
         return httpx.Response(200, json={"keys": ks})
 
 
@@ -60,8 +74,17 @@ def sign(k, hdr, cl):
 
 def claims(**kw):
     n = int(time.time())
-    c = {"iss": ISS, "sub": "0b0e5c4e-uuid", "aud": AUD, "iat": n, "nbf": n, "exp": n + 900,
-         "jti": "j", "client_id": AUD, "scope": "openid groups"}
+    c = {
+        "iss": ISS,
+        "sub": "0b0e5c4e-uuid",
+        "aud": AUD,
+        "iat": n,
+        "nbf": n,
+        "exp": n + 900,
+        "jti": "j",
+        "client_id": AUD,
+        "scope": "openid groups",
+    }
     c.update(kw)
     return {k: v for k, v in c.items() if v is not None}
 
@@ -182,17 +205,29 @@ def test_down_at_start(tmp_path, jwks):
     assert call(a, "read", "Bearer " + tok)[0] == 200
 
 
-@pytest.mark.parametrize("cfg", [
-    '{"issuer":"i","audience":"a","jwks_url":"http://x"}',
-    '{"issuer":"i","jwks_url":"https://x"}',
-    '{"issuer":"i","audience":"a","jwks_url":"https://x","alg":"none"}',
-    "{",
-    '{"issuer":"i","audience":"a","jwks_url":"https://x","callers":{"u":"legacy"}}',
-    '{"issuer":"i","audience":"a","jwks_url":"https://x","callers":{"":"varden"}}',
-    '{"issuer":"i","audience":"a","jwks_url":"https://x","callers":{" ":"varden"}}',
-    '{"issuer":"i","audience":"a","jwks_url":"https://x","callers":{"u":""}}',
-], ids=["http url", "no audience", "unknown field", "bad json", "name collision", "empty sub", "blank sub",
-        "empty name"])
+@pytest.mark.parametrize(
+    "cfg",
+    [
+        '{"issuer":"i","audience":"a","jwks_url":"http://x"}',
+        '{"issuer":"i","jwks_url":"https://x"}',
+        '{"issuer":"i","audience":"a","jwks_url":"https://x","alg":"none"}',
+        "{",
+        '{"issuer":"i","audience":"a","jwks_url":"https://x","callers":{"u":"legacy"}}',
+        '{"issuer":"i","audience":"a","jwks_url":"https://x","callers":{"":"varden"}}',
+        '{"issuer":"i","audience":"a","jwks_url":"https://x","callers":{" ":"varden"}}',
+        '{"issuer":"i","audience":"a","jwks_url":"https://x","callers":{"u":""}}',
+    ],
+    ids=[
+        "http url",
+        "no audience",
+        "unknown field",
+        "bad json",
+        "name collision",
+        "empty sub",
+        "blank sub",
+        "empty name",
+    ],
+)
 def test_config_validation(tmp_path, cfg):
     write(tmp_path / "read" / mcpauth.JWKS_FILE, cfg)
     write(tmp_path / "read/legacy", LEGACY)
@@ -205,3 +240,13 @@ def test_no_callers_accepts_nothing(tmp_path, jwks, caplog):
     a, k = setup(tmp_path, jwks, cfg={c: v for c, v in BASE.items() if c != "callers"})
     assert "no callers" in caplog.text
     assert call(a, "read", "Bearer " + sign(k, HDR, claims()))[0] == 401
+
+
+def test_finite_number_rejects_bool_nan_inf():
+    from mcpauth import _finite_number
+
+    assert _finite_number(1) and _finite_number(1.5)
+    assert not _finite_number(True)
+    assert not _finite_number(float("nan"))
+    assert not _finite_number(float("inf"))
+    assert not _finite_number("1")

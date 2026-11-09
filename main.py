@@ -26,6 +26,7 @@ from server import TOOLS, SpondService, handle_tool_call
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("spond-mcp")
 
+
 class Unauthorized(Exception):
     pass
 
@@ -167,10 +168,18 @@ def build_app(callers: mcpauth.Auth) -> Starlette:
     return Starlette(
         routes=[
             Route("/health", health),
-            Mount("/", app=callers.require("read", Starlette(routes=[
-                Route("/sse", handle_sse),
-                Mount("/messages/", app=sse.handle_post_message),
-            ]))),
+            Mount(
+                "/",
+                app=callers.require(
+                    "read",
+                    Starlette(
+                        routes=[
+                            Route("/sse", handle_sse),
+                            Mount("/messages/", app=sse.handle_post_message),
+                        ]
+                    ),
+                ),
+            ),
         ],
         lifespan=lifespan,
     )

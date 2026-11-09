@@ -187,8 +187,13 @@ MOCK_POSTS = [
         "groupId": "GROUP_FJORDVIK",
         "ownerId": "PROFILE_COACH",
         "comments": [
-            {"id": "COMMENT_1", "fromProfileId": "MEMBER_PARENT", "text": "Notert!",
-             "timestamp": "2026-02-22T11:00:00.000Z", "children": []},
+            {
+                "id": "COMMENT_1",
+                "fromProfileId": "MEMBER_PARENT",
+                "text": "Notert!",
+                "timestamp": "2026-02-22T11:00:00.000Z",
+                "children": [],
+            },
         ],
     },
     {
@@ -205,27 +210,66 @@ MOCK_POSTS = [
         "groupId": "GROUP_SOLVIK",
         "ownerId": "MEMBER_PARENT_B",
         "comments": [
-            {"id": "COMMENT_2", "fromProfileId": "MEMBER_PARENT", "text": "Hurra!",
-             "timestamp": "2026-02-20T09:30:00.000Z",
-             "children": [{"id": "COMMENT_3", "fromProfileId": "PROFILE_COACH", "text": "Gleder oss!",
-                           "timestamp": "2026-02-20T10:00:00.000Z"}]},
+            {
+                "id": "COMMENT_2",
+                "fromProfileId": "MEMBER_PARENT",
+                "text": "Hurra!",
+                "timestamp": "2026-02-20T09:30:00.000Z",
+                "children": [
+                    {
+                        "id": "COMMENT_3",
+                        "fromProfileId": "PROFILE_COACH",
+                        "text": "Gleder oss!",
+                        "timestamp": "2026-02-20T10:00:00.000Z",
+                    }
+                ],
+            },
         ],
     },
 ]
 
 MOCK_CHATS = [
-    {"id": "CHAT_DM", "type": "DM", "participants": ["PROFILE_COACH", "MEMBER_PARENT"], "unread": True,
-     "message": {"chatId": "CHAT_DM", "msgNum": 2, "user": "PROFILE_COACH", "text": "Kan du kjøre?",
-                 "type": "TEXT", "timestamp": "2026-02-22T18:00:00.000Z"}},
-    {"id": "CHAT_GROUP", "name": "Foreldre G2013", "type": "GROUP", "participants": [], "unread": False,
-     "message": {"chatId": "CHAT_GROUP", "msgNum": 7, "type": "SPOND", "timestamp": "2026-02-21T08:00:00.000Z"}},
+    {
+        "id": "CHAT_DM",
+        "type": "DM",
+        "participants": ["PROFILE_COACH", "MEMBER_PARENT"],
+        "unread": True,
+        "message": {
+            "chatId": "CHAT_DM",
+            "msgNum": 2,
+            "user": "PROFILE_COACH",
+            "text": "Kan du kjøre?",
+            "type": "TEXT",
+            "timestamp": "2026-02-22T18:00:00.000Z",
+        },
+    },
+    {
+        "id": "CHAT_GROUP",
+        "name": "Foreldre G2013",
+        "type": "GROUP",
+        "participants": [],
+        "unread": False,
+        "message": {"chatId": "CHAT_GROUP", "msgNum": 7, "type": "SPOND", "timestamp": "2026-02-21T08:00:00.000Z"},
+    },
 ]
 
 MOCK_MESSAGES = [
-    {"chatId": "CHAT_DM", "msgNum": 2, "user": "PROFILE_COACH", "text": "Kan du kjøre?", "type": "TEXT",
-     "timestamp": "2026-02-22T18:00:00.000Z"},
-    {"chatId": "CHAT_DM", "msgNum": 1, "user": "MEMBER_PARENT", "text": "Hei!", "type": "TEXT",
-     "timestamp": "2026-02-22T17:00:00.000Z"},
+    {
+        "chatId": "CHAT_DM",
+        "msgNum": 2,
+        "user": "PROFILE_COACH",
+        "text": "Kan du kjøre?",
+        "type": "TEXT",
+        "timestamp": "2026-02-22T18:00:00.000Z",
+    },
+    {
+        "chatId": "CHAT_DM",
+        "msgNum": 1,
+        "user": "MEMBER_PARENT",
+        "text": "Hei!",
+        "type": "TEXT",
+        "timestamp": "2026-02-22T17:00:00.000Z",
+    },
 ]
 
 
@@ -236,18 +280,45 @@ def mock_activities():
         return (datetime.now(UTC) - timedelta(hours=hours)).isoformat().replace("+00:00", "Z")
 
     return [
-        {"id": "A1", "type": "new_post", "timestamp": ago(1), "post": {"id": "POST_1"},
-         "group": {"id": "GROUP_FJORDVIK", "name": "Fjordvik FK G2013"},
-         "user": {"id": "PROFILE_COACH", "name": "Trener Hansen"}},
-        {"id": "A2", "type": "post_reaction", "timestamp": ago(2), "post": {"id": "POST_1"},
-         "group": {"id": "GROUP_FJORDVIK"}, "user": {"id": "MEMBER_PARENT"}},
-        {"id": "A3", "type": "schedule_event", "timestamp": ago(3), "spond": {"id": "EVENT_1"},
-         "group": {"id": "GROUP_SOLVIK"}, "user": {"id": "MEMBER_PARENT_B"}},
-        {"id": "A3b", "type": "new_post", "timestamp": ago(3.5), "post": {"id": "POST_1"},
-         "group": {"id": "GROUP_FJORDVIK", "name": "Fjordvik FK G2013"},
-         "user": {"id": "PROFILE_COACH", "name": "Trener Hansen"}},
-        {"id": "A4", "type": "chat_mention", "timestamp": ago(100), "chat": {"id": "CHAT_DM", "chatNum": 1},
-         "user": {"id": "PROFILE_COACH"}},
+        {
+            "id": "A1",
+            "type": "new_post",
+            "timestamp": ago(1),
+            "post": {"id": "POST_1"},
+            "group": {"id": "GROUP_FJORDVIK", "name": "Fjordvik FK G2013"},
+            "user": {"id": "PROFILE_COACH", "name": "Trener Hansen"},
+        },
+        {
+            "id": "A2",
+            "type": "post_reaction",
+            "timestamp": ago(2),
+            "post": {"id": "POST_1"},
+            "group": {"id": "GROUP_FJORDVIK"},
+            "user": {"id": "MEMBER_PARENT"},
+        },
+        {
+            "id": "A3",
+            "type": "schedule_event",
+            "timestamp": ago(3),
+            "spond": {"id": "EVENT_1"},
+            "group": {"id": "GROUP_SOLVIK"},
+            "user": {"id": "MEMBER_PARENT_B"},
+        },
+        {
+            "id": "A3b",
+            "type": "new_post",
+            "timestamp": ago(3.5),
+            "post": {"id": "POST_1"},
+            "group": {"id": "GROUP_FJORDVIK", "name": "Fjordvik FK G2013"},
+            "user": {"id": "PROFILE_COACH", "name": "Trener Hansen"},
+        },
+        {
+            "id": "A4",
+            "type": "chat_mention",
+            "timestamp": ago(100),
+            "chat": {"id": "CHAT_DM", "chatNum": 1},
+            "user": {"id": "PROFILE_COACH"},
+        },
     ]
 
 

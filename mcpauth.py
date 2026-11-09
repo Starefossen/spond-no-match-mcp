@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -46,6 +47,10 @@ _caller: contextvars.ContextVar[str] = contextvars.ContextVar("mcpauth_caller", 
 
 def caller() -> str:
     return _caller.get()
+
+
+def _finite_number(v: object) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 class _StaticVerifier:
@@ -88,15 +93,21 @@ def fetch_jwks(url: str) -> dict[str, ec.EllipticCurvePublicKey]:
         if not isinstance(k, dict):
             continue
         g = lambda f: k.get(f) if isinstance(k.get(f), str) else ""  # noqa: E731
-        if g("kty") != "EC" or g("crv") != "P-256" or not g("kid") or g("use") not in ("", "sig") \
-                or g("alg") not in ("", "ES256"):
+        if (
+            g("kty") != "EC"
+            or g("crv") != "P-256"
+            or not g("kid")
+            or g("use") not in ("", "sig")
+            or g("alg") not in ("", "ES256")
+        ):
             continue
         try:
             x, y = _b64d(g("x")), _b64d(g("y"))
             if len(x) != 32 or len(y) != 32:
                 continue
             keys[g("kid")] = ec.EllipticCurvePublicNumbers(
-                int.from_bytes(x, "big"), int.from_bytes(y, "big"), ec.SECP256R1()).public_key()
+                int.from_bytes(x, "big"), int.from_bytes(y, "big"), ec.SECP256R1()
+            ).public_key()
         except ValueError:
             continue
     if not keys:
@@ -158,9 +169,15 @@ class _JWTVerifier:
         if len(parts) != 3:
             return None
         hdr = _decode_json(parts[0])
-        if not isinstance(hdr, dict) or hdr.get("alg") != "ES256" or not isinstance(hdr.get("kid"), str) \
-                or not hdr["kid"] or not isinstance(hdr.get("typ"), str) or hdr["typ"].lower() != "at+jwt" \
-                or "crit" in hdr:
+        if (
+            not isinstance(hdr, dict)
+            or hdr.get("alg") != "ES256"
+            or not isinstance(hdr.get("kid"), str)
+            or not hdr["kid"]
+            or not isinstance(hdr.get("typ"), str)
+            or hdr["typ"].lower() != "at+jwt"
+            or "crit" in hdr
+        ):
             return None
         try:
             sig = _b64d(parts[2])
@@ -180,11 +197,13 @@ class _JWTVerifier:
         if not isinstance(c, dict) or c.get("iss") != self.cfg["issuer"]:
             return None
         aud = c.get("aud")
-        if not (aud == self.cfg["audience"] or (isinstance(aud, list) and self.cfg["audience"] in aud)):
+        aud_ok = aud == self.cfg["audience"] or (
+            isinstance(aud, list) and all(isinstance(a, str) for a in aud) and self.cfg["audience"] in aud
+        )
+        if not aud_ok:
             return None
         exp, nbf = c.get("exp"), c.get("nbf")
-        num = (int, float)
-        if not isinstance(exp, num) or isinstance(exp, bool) or (nbf is not None and not isinstance(nbf, num)):
+        if not _finite_number(exp) or (nbf is not None and not _finite_number(nbf)):
             return None
         t = time.time()
         if t > exp + CLOCK_SKEW or (nbf is not None and t < nbf - CLOCK_SKEW):
@@ -205,13 +224,23 @@ def _load_jwt_config(p: str) -> _JWTVerifier:
             raise ValueError(f"{JWKS_FILE}: {e}") from None
     if not isinstance(c, dict) or set(c) - _CONFIG_KEYS:
         raise ValueError(f"{JWKS_FILE}: unknown fields")
-    if not isinstance(c.get("issuer"), str) or not c["issuer"] or not isinstance(c.get("audience"), str) \
-            or not c["audience"] or not isinstance(c.get("jwks_url"), str) or not c["jwks_url"].startswith("https://"):
+    if (
+        not isinstance(c.get("issuer"), str)
+        or not c["issuer"]
+        or not isinstance(c.get("audience"), str)
+        or not c["audience"]
+        or not isinstance(c.get("jwks_url"), str)
+        or not c["jwks_url"].startswith("https://")
+    ):
         raise ValueError(f"{JWKS_FILE}: issuer, audience and https jwks_url are required")
     c.setdefault("required_scope", [])
     c.setdefault("callers", {})
-    if not isinstance(c["required_scope"], list) or not all(isinstance(s, str) for s in c["required_scope"]) \
-            or not isinstance(c["callers"], dict) or not all(isinstance(v, str) for v in c["callers"].values()):
+    if (
+        not isinstance(c["required_scope"], list)
+        or not all(isinstance(s, str) for s in c["required_scope"])
+        or not isinstance(c["callers"], dict)
+        or not all(isinstance(v, str) for v in c["callers"].values())
+    ):
         raise ValueError(f"{JWKS_FILE}: bad required_scope or callers")
     return _JWTVerifier(c)
 
@@ -318,6 +347,7 @@ class _Require:
         logger.warning("auth=denied path=%s remote=%s", path, client[0] if client else "unknown")
         if scope["type"] == "websocket":
             return await send({"type": "websocket.close", "code": 1008})
-        await send({"type": "http.response.start", "status": 401,
-                    "headers": [(b"content-type", b"text/plain; charset=utf-8")]})
+        await send(
+            {"type": "http.response.start", "status": 401, "headers": [(b"content-type", b"text/plain; charset=utf-8")]}
+        )
         await send({"type": "http.response.body", "body": b"unauthorized"})

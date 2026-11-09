@@ -78,10 +78,18 @@ def test_require(callers, caplog):
     assert mcpauth.caller() == ""
 
 
-@pytest.mark.parametrize("authz,query", [
-    (None, b""), (None, ("token=" + VARDEN).encode()), (VARDEN, b""), ("Basic " + VARDEN, b""),
-    ("bearer " + VARDEN, b""), ("Bearer wrong-token-0123456789", b""), ("Bearer " + VARDEN + "x", b""),
-])
+@pytest.mark.parametrize(
+    "authz,query",
+    [
+        (None, b""),
+        (None, ("token=" + VARDEN).encode()),
+        (VARDEN, b""),
+        ("Basic " + VARDEN, b""),
+        ("bearer " + VARDEN, b""),
+        ("Bearer wrong-token-0123456789", b""),
+        ("Bearer " + VARDEN + "x", b""),
+    ],
+)
 def test_denied(callers, caplog, authz, query):
     a = mcpauth.load(callers)
     caplog.set_level(logging.INFO, logger="mcpauth")
