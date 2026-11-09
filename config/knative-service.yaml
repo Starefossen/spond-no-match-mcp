@@ -89,8 +89,6 @@ spec:
           items:
           - key: varden
             path: read/varden
-          - key: token
-            path: read/legacy
           - key: operator
             path: read/operator
       serviceAccountName: default
