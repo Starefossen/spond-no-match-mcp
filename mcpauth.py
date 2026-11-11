@@ -152,7 +152,10 @@ class _JWTVerifier:
     async def key(self, kid: str):
         with self._lock:
             k = self.keys.get(kid)
-            if k is not None or time.monotonic() - self.last_fetch < KID_REFETCH_GAP:
+            # No keys yet means the first fetch is still running or failed
+            # (cold start): fetch now instead of rejecting the token.
+            recent = time.monotonic() - self.last_fetch < KID_REFETCH_GAP
+            if k is not None or (self.keys and recent):
                 return k
             self.last_fetch = time.monotonic()
         await asyncio.to_thread(self._fetch)

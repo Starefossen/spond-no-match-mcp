@@ -265,3 +265,12 @@ def test_finite_number_rejects_bool_nan_inf():
     assert not _finite_number(float("nan"))
     assert not _finite_number(float("inf"))
     assert not _finite_number("1")
+
+
+def test_cold_start_fetches_when_no_keys(tmp_path, jwks):
+    a, k = setup(tmp_path, jwks)
+    v = a._groups["read"].jwt
+    # First background fetch has started (last_fetch is recent) but not finished.
+    v.keys = {}
+    v.last_fetch = time.monotonic()
+    assert call(a, "read", "Bearer " + sign(k, HDR, claims()))[0] == 200
