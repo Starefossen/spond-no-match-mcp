@@ -379,7 +379,7 @@ def format_post_summary(
     lines = [header]
     if title := (post.get("title") or "").strip():
         lines.append(title)
-    if body := truncate(post.get("body"), 300):
+    if body := truncate(post.get("body"), 200):
         lines.append(body)
     if n := count_comments(post.get("comments", [])):
         lines.append(f"({n} kommentar{'er' if n != 1 else ''}) [id: {post['id']}]")
@@ -604,6 +604,11 @@ TOOLS = [
                     "type": "integer",
                     "description": "Maks antall innlegg å hente (standard: 10).",
                     "default": 10,
+                },
+                "since_days": {
+                    "type": "integer",
+                    "description": "Hopp over innlegg eldre enn så mange dager (standard: 14).",
+                    "default": 14,
                 },
             },
         },
@@ -854,7 +859,9 @@ async def resolve_group(service: SpondService, group_name: str) -> str | None:
     return None
 
 
-async def handle_get_posts(service: SpondService, group_name: str = "", max_posts: int = 10) -> str:
+async def handle_get_posts(
+    service: SpondService, group_name: str = "", max_posts: int = 10, since_days: int = 14
+) -> str:
     group_id = None
     if group_name:
         group_id = await resolve_group(service, group_name)
@@ -862,8 +869,10 @@ async def handle_get_posts(service: SpondService, group_name: str = "", max_post
             return f"Fant ingen gruppe som matcher '{group_name}'."
 
     posts = await service.get_posts(group_id=group_id, max_posts=min(max_posts, 50))
+    cutoff = datetime.now(UTC) - timedelta(days=since_days)
+    posts = [p for p in posts if (ts := parse_timestamp(p.get("timestamp", ""))) is None or ts >= cutoff]
     if not posts:
-        return "Ingen innlegg funnet."
+        return f"Ingen innlegg siste {since_days} dager."
 
     group_map = await service.get_group_map()
     people = await service.get_people_map()
@@ -1008,6 +1017,7 @@ async def handle_tool_call(service: SpondService, name: str, arguments: dict | N
             service,
             group_name=args.get("group_name", ""),
             max_posts=args.get("max_posts", 10),
+            since_days=args.get("since_days", 14),
         )
     elif name == "get_post_comments":
         post_id = args.get("post_id", "")

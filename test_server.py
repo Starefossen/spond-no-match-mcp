@@ -1,6 +1,7 @@
 """Unit tests for Spond MCP server."""
 
 import time
+from datetime import UTC, datetime
 
 import pytest
 
@@ -577,7 +578,7 @@ class TestFormatPostSummary:
     def test_long_body_truncated(self):
         post = {**MOCK_POSTS[0], "body": "x" * 400}
         result = format_post_summary(post, {})
-        assert len([line for line in result.split("\n") if "x" in line][0]) <= 300
+        assert len([line for line in result.split("\n") if "x" in line][0]) <= 200
 
     def test_no_maps(self):
         result = format_post_summary(MOCK_POSTS[0], None)
@@ -588,7 +589,7 @@ class TestFormatPostSummary:
 class TestGetPosts:
     @pytest.mark.asyncio
     async def test_all_posts(self, service):
-        result = await handle_tool_call(service, "get_posts", {})
+        result = await handle_tool_call(service, "get_posts", {"since_days": 36500})
         assert "Innlegg (3 stk)" in result
         assert "drikkebokser" in result
         assert "innendørs" in result
@@ -596,7 +597,7 @@ class TestGetPosts:
 
     @pytest.mark.asyncio
     async def test_filter_by_group(self, service):
-        result = await handle_tool_call(service, "get_posts", {"group_name": "Fjordvik"})
+        result = await handle_tool_call(service, "get_posts", {"group_name": "Fjordvik", "since_days": 36500})
         assert "drikkebokser" in result
         assert "Velkommen" not in result
 
@@ -607,7 +608,7 @@ class TestGetPosts:
 
     @pytest.mark.asyncio
     async def test_max_posts(self, service):
-        result = await handle_tool_call(service, "get_posts", {"max_posts": 1})
+        result = await handle_tool_call(service, "get_posts", {"max_posts": 1, "since_days": 36500})
         assert "Innlegg (1 stk)" in result
 
     @pytest.mark.asyncio
@@ -618,8 +619,20 @@ class TestGetPosts:
 
     @pytest.mark.asyncio
     async def test_posts_include_group_name(self, service):
-        result = await handle_tool_call(service, "get_posts", {})
+        result = await handle_tool_call(service, "get_posts", {"since_days": 36500})
         assert "Fjordvik FK G2013" in result
+
+    @pytest.mark.asyncio
+    async def test_since_days_default_drops_old(self, service):
+        assert "Ingen innlegg siste 14 dager" in await handle_tool_call(service, "get_posts", {})
+
+    @pytest.mark.asyncio
+    async def test_since_days_keeps_recent(self, service):
+        fresh = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        service._client.get_posts.side_effect = None
+        service._client.get_posts.return_value = [{**MOCK_POSTS[0], "timestamp": fresh}, MOCK_POSTS[1]]
+        result = await handle_tool_call(service, "get_posts", {})
+        assert "Innlegg (1 stk)" in result
 
 
 class TestPostComments:
