@@ -578,7 +578,7 @@ class TestFormatPostSummary:
     def test_long_body_truncated(self):
         post = {**MOCK_POSTS[0], "body": "x" * 400}
         result = format_post_summary(post, {})
-        assert len([line for line in result.split("\n") if "x" in line][0]) <= 200
+        assert len([line for line in result.split("\n") if "x" in line][0]) <= 240
 
     def test_no_maps(self):
         result = format_post_summary(MOCK_POSTS[0], None)
@@ -821,3 +821,20 @@ def test_load_refuses_missing_config(tmp_path):
         mcpauth.load(None)
     with pytest.raises(ValueError):
         mcpauth.load(str(tmp_path))
+
+
+class TestPostBodyTruncation:
+    LONG = "Husk " + "ord " * 100 + "SLUTT"
+
+    def test_list_marks_truncated(self):
+        out = format_post_summary({"id": "p", "body": self.LONG})
+        assert "(avkortet, se get_post_comments)" in out
+        assert "SLUTT" not in out
+
+    def test_short_body_unmarked(self):
+        assert "avkortet" not in format_post_summary({"id": "p", "body": "kort"})
+
+    def test_full_body(self):
+        out = format_post_summary({"id": "p", "body": self.LONG}, full=True)
+        assert "SLUTT" in out
+        assert "avkortet" not in out

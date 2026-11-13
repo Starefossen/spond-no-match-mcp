@@ -364,7 +364,10 @@ def count_comments(comments: list[dict]) -> int:
 
 
 def format_post_summary(
-    post: dict, group_map: dict[str, str] | None = None, people: dict[str, str] | None = None
+    post: dict,
+    group_map: dict[str, str] | None = None,
+    people: dict[str, str] | None = None,
+    full: bool = False,
 ) -> str:
     author = (people or {}).get(post.get("ownerId", ""), "Ukjent")
     group_name = (group_map or {}).get(post.get("groupId", ""), "")
@@ -379,7 +382,12 @@ def format_post_summary(
     lines = [header]
     if title := (post.get("title") or "").strip():
         lines.append(title)
-    if body := truncate(post.get("body"), 200):
+    if full:
+        if body := " ".join((post.get("body") or "").split()):
+            lines.append(body)
+    elif body := truncate(post.get("body"), 200):
+        if body.endswith("..."):
+            body += " … (avkortet, se get_post_comments)"
         lines.append(body)
     if n := count_comments(post.get("comments", [])):
         lines.append(f"({n} kommentar{'er' if n != 1 else ''}) [id: {post['id']}]")
@@ -888,7 +896,7 @@ async def handle_get_post_comments(service: SpondService, post_id: str) -> str:
     if not post:
         return f"Fant ikke innlegget {post_id} blant de 50 nyeste innleggene."
     people = await service.get_people_map()
-    lines = [format_post_summary(post, await service.get_group_map(), people)]
+    lines = [format_post_summary(post, await service.get_group_map(), people, full=True)]
     comments = post.get("comments", [])
     if not comments:
         lines.append("Ingen kommentarer.")
