@@ -64,6 +64,26 @@ spec:
             - port: "443"
               protocol: TCP
 
+    # Attachment downloads (get_attachment); files at https://spond.com/storage/
+    - toFQDNs:
+        - matchName: "spond.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+
+    # Docling PDF parsing service (via Kourier gateway)
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kourier-system
+            app: 3scale-kourier-gateway
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "8443"
+              protocol: TCP
+
     # Alerts on Spond login failure
     - toFQDNs:
         - matchName: "ntfy.sh"

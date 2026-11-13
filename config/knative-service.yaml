@@ -36,6 +36,8 @@ spec:
             secretKeyRef:
               name: spond-credentials
               key: password
+        - name: DOCLING_URL
+          value: "https://docling.docling.fn.flaatten.org"
         - name: MCP_CALLERS_DIR
           value: /var/run/mcp-callers
         - name: NTFY_TOPIC

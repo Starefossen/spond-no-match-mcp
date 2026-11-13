@@ -26,6 +26,7 @@ An [MCP](https://modelcontextprotocol.io/) server for managing kids' sports acti
 | `get_post_comments`   | One post with all comments and replies                          |
 | `get_chats`           | Recent chats (DM, group, club) with last message and unread flag |
 | `get_chat_messages`   | Message history for one chat (newest 10, oldest first)          |
+| `get_attachment`      | Attachment (📎) by id: PDF as text via docling (`DOCLING_URL`), otherwise name and link |
 
 All tools except `respond_to_event` are read-only. Chat history, `get_updates` and post comments use
 Spond endpoints the `spond` library does not wrap (`GET {chat_url}/chats/{id}/messages`, `GET /core/v1/activities`);

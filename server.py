@@ -1,11 +1,14 @@
 """Spond MCP server — service layer, tool definitions, and formatting."""
 
 import logging
+import os
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import unquote, urlparse
 from zoneinfo import ZoneInfo
 
+import httpx
 from spond.spond import Spond
 
 logger = logging.getLogger(__name__)
@@ -352,11 +355,45 @@ def format_chat_summary(chat: dict, people: dict[str, str] | None = None) -> str
     return line + f" [id: {chat['id']}]"
 
 
-def format_message_summary(msg: dict, people: dict[str, str] | None = None) -> str:
+MEDIA_TYPES = {"IMAGE": "bilde", "VIDEO": "video"}
+
+
+def _url_name(url: str) -> str:
+    return unquote(urlparse(url).path.rsplit("/", 1)[-1]) or "vedlegg"
+
+
+def extract_attachments(obj: dict) -> list[dict]:
+    """Attachments as [{name, url, type}] from a chat message, post or comment (live-verified shapes).
+
+    Chat: clubMessage.attachments[] {title, type: 2 = PDF, media} and images[] {url}.
+    Post: media[] {type: IMAGE|VIDEO, url}. Comment: image {url}.
+    """
+    out = []
+    for a in (obj.get("clubMessage") or {}).get("attachments") or []:
+        url = a.get("media") or ""
+        is_pdf = a.get("type") == 2 or urlparse(url).path.lower().endswith(".pdf")
+        out.append({"name": a.get("title") or _url_name(url), "url": url, "type": "PDF" if is_pdf else "fil"})
+    for img in obj.get("images") or []:
+        out.append({"name": _url_name(img.get("url", "")), "url": img.get("url", ""), "type": "bilde"})
+    for m in obj.get("media") or []:
+        kind = MEDIA_TYPES.get(m.get("type", ""), "fil")
+        out.append({"name": _url_name(m.get("url", "")), "url": m.get("url", ""), "type": kind})
+    if img := obj.get("image"):
+        out.append({"name": _url_name(img.get("url", "")), "url": img.get("url", ""), "type": "bilde"})
+    return out
+
+
+def attachment_lines(obj: dict, id_prefix: str, indent: str = "") -> list[str]:
+    return [f"{indent}📎 {a['name']} [vedlegg: {id_prefix}:{i}]" for i, a in enumerate(extract_attachments(obj))]
+
+
+def format_message_summary(msg: dict, people: dict[str, str] | None = None, chat_id: str = "") -> str:
     sender = (people or {}).get(msg.get("user", ""), "Ukjent")
     text = truncate(msg.get("text"), 500) or f"({msg.get('type', 'melding').lower()})"
     ts = short_ts(msg.get("timestamp", ""))
-    return f"[{ts}] {sender}: {text}" if ts else f"{sender}: {text}"
+    line = f"[{ts}] {sender}: {text}" if ts else f"{sender}: {text}"
+    msg_key = msg.get("msgNum", msg.get("id", ""))
+    return "\n".join([line, *attachment_lines(msg, f"chat:{chat_id}:{msg_key}", "  ")])
 
 
 def count_comments(comments: list[dict]) -> int:
@@ -389,6 +426,7 @@ def format_post_summary(
         if body.endswith("..."):
             body += " … (avkortet, se get_post_comments)"
         lines.append(body)
+    lines.extend(attachment_lines(post, f"post:{post.get('id', '')}"))
     if n := count_comments(post.get("comments", [])):
         lines.append(f"({n} kommentar{'er' if n != 1 else ''}) [id: {post['id']}]")
     else:
@@ -396,11 +434,12 @@ def format_post_summary(
     return "\n".join(lines)
 
 
-def format_comment(comment: dict, people: dict[str, str], indent: str = "") -> list[str]:
+def format_comment(comment: dict, people: dict[str, str], indent: str = "", post_id: str = "") -> list[str]:
     who = people.get(comment.get("fromProfileId", ""), "Ukjent")
     lines = [f"{indent}[{short_ts(comment.get('timestamp', ''))}] {who}: {truncate(comment.get('text'), 300)}"]
+    lines.extend(attachment_lines(comment, f"comment:{post_id}:{comment.get('id', '')}", " " * len(indent) + "  "))
     for child in comment.get("children", []):
-        lines.extend(format_comment(child, people, indent + "  ↳ "))
+        lines.extend(format_comment(child, people, indent + "  ↳ ", post_id))
     return lines
 
 
@@ -668,6 +707,20 @@ TOOLS = [
             "required": ["chat_id"],
         },
     },
+    {
+        "name": "get_attachment",
+        "description": (
+            "Hent et vedlegg (📎) fra en chatmelding, et innlegg eller en kommentar. "
+            "PDF-er blir gjort om til tekst; for bilder og andre filer får du navn, type og lenke."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Vedleggs-ID fra [vedlegg: ...] i chat- eller innleggslisten."},
+            },
+            "required": ["id"],
+        },
+    },
 ]
 
 
@@ -901,7 +954,7 @@ async def handle_get_post_comments(service: SpondService, post_id: str) -> str:
     if not comments:
         lines.append("Ingen kommentarer.")
     for comment in comments:
-        lines.extend(format_comment(comment, people))
+        lines.extend(format_comment(comment, people, post_id=post_id))
     return "\n".join(lines)
 
 
@@ -924,7 +977,7 @@ async def handle_get_chat_messages(service: SpondService, chat_id: str, limit: i
 
     people = await service.get_people_map()
     lines = [f"Meldinger i samtalen ({len(messages)} stk, eldste først):"]
-    lines.extend(format_message_summary(msg, people) for msg in messages)
+    lines.extend(format_message_summary(msg, people, chat_id) for msg in messages)
     return "\n".join(lines)
 
 
@@ -970,6 +1023,85 @@ async def handle_get_updates(
     if not lines:
         return f"Ingen nye hendelser de siste {since_hours} timene."
     return f"Nytt i Spond siste {since_hours} t ({len(lines)} stk, nyeste først):\n" + "\n".join(lines)
+
+
+ATTACHMENT_TEXT_LIMIT = 15000
+ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024
+
+
+def http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=120, follow_redirects=True)
+
+
+async def find_attachment(service: SpondService, attachment_id: str) -> dict | str:
+    """Resolve chat:<chat>:<msg>:<n>, post:<post>:<n> or comment:<post>:<comment>:<n>."""
+    kind, _, rest = attachment_id.partition(":")
+    parts = rest.split(":")
+    try:
+        index = int(parts[-1])
+    except ValueError:
+        return f"Ugyldig vedleggs-ID: {attachment_id}"
+    if kind == "chat" and len(parts) == 3:
+        msgs = await service.get_chat_messages(parts[0], limit=10)
+        item = next((m for m in msgs if str(m.get("msgNum", m.get("id", ""))) == parts[1]), None)
+        missing = "Fant ikke meldingen blant de 10 nyeste i samtalen."
+    elif kind in ("post", "comment") and len(parts) == (2 if kind == "post" else 3):
+        item = await service.get_post(parts[0])
+        if item and kind == "comment":
+            flat = [c for top in item.get("comments", []) for c in (top, *top.get("children", []))]
+            item = next((c for c in flat if c.get("id") == parts[1]), None)
+        missing = "Fant ikke innlegget eller kommentaren blant de 50 nyeste innleggene."
+    else:
+        return f"Ugyldig vedleggs-ID: {attachment_id}"
+    if not item:
+        return missing
+    attachments = extract_attachments(item)
+    if not 0 <= index < len(attachments):
+        return f"Fant ikke vedlegg nr. {index} her."
+    return attachments[index]
+
+
+async def convert_pdf(docling_url: str, data: bytes, filename: str) -> str:
+    async with http_client() as http:
+        r = await http.post(
+            f"{docling_url.rstrip('/')}/v1/convert/file",
+            files={"files": (filename, data, "application/pdf")},
+            data={"to_formats": "text"},
+        )
+        r.raise_for_status()
+        return (r.json().get("document") or {}).get("text_content") or ""
+
+
+async def handle_get_attachment(service: SpondService, attachment_id: str) -> str:
+    found = await find_attachment(service, attachment_id)
+    if isinstance(found, str):
+        return found
+    name, url, ftype = found["name"], found["url"], found["type"]
+    header = f"📎 {name}" + (f" ({ftype})" if ftype else "")
+    link = f"Lenke: {url}" if url else "Ingen lenke til filen."
+    is_pdf = "pdf" in ftype.lower() or name.lower().endswith(".pdf") or urlparse(url).path.lower().endswith(".pdf")
+    if not is_pdf or not url:
+        return f"{header}\n{link}"
+    docling_url = os.environ.get("DOCLING_URL", "").strip()
+    if not docling_url:
+        return f"{header}\nPDF-lesing er ikke satt opp (DOCLING_URL mangler).\n{link}"
+    try:
+        async with http_client() as http:
+            r = await http.get(url)
+            r.raise_for_status()
+            data = r.content
+        if len(data) > ATTACHMENT_MAX_BYTES:
+            return f"{header}\nFilen er for stor til å lese ({len(data) // 1024 // 1024} MB).\n{link}"
+        text = (await convert_pdf(docling_url, data, name)).strip()
+    except httpx.HTTPError as e:
+        logger.warning("get_attachment %s failed: %s", attachment_id, e)
+        return f"{header}\nKlarte ikke å lese PDF-en ({type(e).__name__}).\n{link}"
+    if not text:
+        return f"{header}\nFant ingen tekst i PDF-en.\n{link}"
+    if len(text) > ATTACHMENT_TEXT_LIMIT:
+        rest = len(text) - ATTACHMENT_TEXT_LIMIT
+        text = text[:ATTACHMENT_TEXT_LIMIT] + f"… (avkortet, {rest} tegn til)"
+    return f"{header}\n\n{text}"
 
 
 async def handle_tool_call(service: SpondService, name: str, arguments: dict | None) -> str:
@@ -1053,5 +1185,10 @@ async def handle_tool_call(service: SpondService, name: str, arguments: dict | N
             chat_id=chat_id,
             limit=args.get("limit", 10),
         )
+    elif name == "get_attachment":
+        attachment_id = args.get("id", "")
+        if not attachment_id:
+            return "id er påkrevd."
+        return await handle_get_attachment(service, attachment_id)
     else:
         return f"Ukjent verktøy: {name}"

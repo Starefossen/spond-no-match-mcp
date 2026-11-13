@@ -2,9 +2,12 @@
 
 import time
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
+import server
 from conftest import (
     MOCK_EVENT_CANCELLED,
     MOCK_EVENT_DETAIL,
@@ -735,7 +738,7 @@ class TestToolDefinitions:
         assert "accept" in respond["inputSchema"]["required"]
 
     def test_expected_tool_count(self):
-        assert len(TOOLS) == 11
+        assert len(TOOLS) == 12
 
     def test_tool_names(self):
         names = {t["name"] for t in TOOLS}
@@ -751,6 +754,7 @@ class TestToolDefinitions:
             "get_chat_messages",
             "get_post_comments",
             "get_updates",
+            "get_attachment",
         }
 
 
@@ -838,3 +842,84 @@ class TestPostBodyTruncation:
         out = format_post_summary({"id": "p", "body": self.LONG}, full=True)
         assert "SLUTT" in out
         assert "avkortet" not in out
+
+
+class TestAttachments:
+    PDF_URL = "https://spond.com/storage/upload/ABC/Terminliste.pdf"
+    POST = {
+        "id": "POST_M",
+        "title": "Kampbilder",
+        "timestamp": "2026-02-22T10:30:00.000Z",
+        "media": [
+            {"type": "IMAGE", "url": "https://spond.com/storage/upload/X/kamp.jpg", "width": 800, "height": 600},
+            {"type": "VIDEO", "url": "https://spond.com/storage/upload/Y/maal.m3u8", "thumbnailUrl": "t"},
+        ],
+        "comments": [{"id": "C1", "text": "Se bilde", "image": {"url": "https://spond.com/storage/b/bilde.jpg"}}],
+    }
+    MSG = {
+        "msgNum": 7,
+        "user": "X",
+        "text": "Terminliste",
+        "clubMessage": {
+            "clubImage": "https://spond.com/storage/logo.png",
+            "attachments": [{"id": "A1", "title": "Terminliste.pdf", "type": 2, "media": PDF_URL}],
+        },
+        "images": [{"url": "https://spond.com/storage/c/foto.jpg", "width": 1, "height": 1}],
+    }
+
+    @pytest.fixture
+    def att_service(self, service):
+        service.get_post = AsyncMock(side_effect=lambda pid: self.POST if pid == "POST_M" else None)
+        service.get_chat_messages = AsyncMock(return_value=[self.MSG])
+        return service
+
+    @pytest.fixture
+    def mock_http(self, monkeypatch):
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            if request.url.path == "/v1/convert/file":
+                return httpx.Response(200, json={"document": {"text_content": "x" * 15010}})
+            return httpx.Response(200, content=b"%PDF-1.4")
+
+        monkeypatch.setattr(server, "http_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+        return calls
+
+    def test_formatting_lines(self):
+        post = format_post_summary(self.POST)
+        assert "📎 kamp.jpg [vedlegg: post:POST_M:0]" in post
+        assert "📎 maal.m3u8 [vedlegg: post:POST_M:1]" in post
+        lines = server.format_comment(self.POST["comments"][0], {}, post_id="POST_M")
+        assert lines[1] == "  📎 bilde.jpg [vedlegg: comment:POST_M:C1:0]"
+        msg = server.format_message_summary(self.MSG, {}, "CH")
+        assert "  📎 Terminliste.pdf [vedlegg: chat:CH:7:0]" in msg
+        assert "  📎 foto.jpg [vedlegg: chat:CH:7:1]" in msg
+        assert "logo" not in msg
+        assert "📎" not in server.format_message_summary({"text": "hei"}, {}, "CH")
+
+    async def test_chat_pdf_converted_and_capped(self, att_service, mock_http, monkeypatch):
+        monkeypatch.setenv("DOCLING_URL", "https://docling.test")
+        result = await handle_tool_call(att_service, "get_attachment", {"id": "chat:CH:7:0"})
+        assert result.startswith("📎 Terminliste.pdf (PDF)")
+        assert result.endswith("… (avkortet, 10 tegn til)")
+        assert [c.url.host for c in mock_http] == ["spond.com", "docling.test"]
+
+    async def test_no_docling(self, att_service, mock_http, monkeypatch):
+        monkeypatch.delenv("DOCLING_URL", raising=False)
+        result = await handle_tool_call(att_service, "get_attachment", {"id": "chat:CH:7:0"})
+        assert "PDF-lesing er ikke satt opp" in result
+        assert f"Lenke: {self.PDF_URL}" in result
+        assert not mock_http
+
+    async def test_images_and_video_link_only(self, att_service, mock_http):
+        result = await handle_tool_call(att_service, "get_attachment", {"id": "comment:POST_M:C1:0"})
+        assert result == "📎 bilde.jpg (bilde)\nLenke: https://spond.com/storage/b/bilde.jpg"
+        assert "(video)" in await handle_tool_call(att_service, "get_attachment", {"id": "post:POST_M:1"})
+        assert "(bilde)" in await handle_tool_call(att_service, "get_attachment", {"id": "chat:CH:7:1"})
+        assert not mock_http
+
+    async def test_bad_ids(self, att_service):
+        assert "Ugyldig" in await handle_tool_call(att_service, "get_attachment", {"id": "foo"})
+        assert "Fant ikke vedlegg" in await handle_tool_call(att_service, "get_attachment", {"id": "post:POST_M:5"})
+        assert "påkrevd" in await handle_tool_call(att_service, "get_attachment", {})
