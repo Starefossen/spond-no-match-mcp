@@ -919,6 +919,56 @@ class TestAttachments:
         assert "(bilde)" in await handle_tool_call(att_service, "get_attachment", {"id": "chat:CH:7:1"})
         assert not mock_http
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://evil.com/x.pdf",
+            "http://spond.com/storage/x.pdf",
+            "https://spond.com@evil/x.pdf",
+            "https://evil/spond.com",
+            "https://spond.com.evil/x.pdf",
+            "https://spond.com:8443/x.pdf",
+            "file:///etc/passwd",
+        ],
+    )
+    async def test_fetch_denies_foreign_urls(self, url):
+        calls = []
+        transport = httpx.MockTransport(lambda r: calls.append(r) or httpx.Response(200, content=b"x"))
+        async with httpx.AsyncClient(transport=transport) as http:
+            with pytest.raises(server.AttachmentRejected):
+                await server.fetch_attachment(http, url)
+        assert not calls
+
+    async def test_fetch_redirects(self):
+        def handler(r):
+            if r.url.path == "/storage/a.pdf":
+                return httpx.Response(302, headers={"location": "/storage/ok.pdf"})
+            if r.url.path == "/storage/b.pdf":
+                return httpx.Response(302, headers={"location": "https://evil.com/c.pdf"})
+            return httpx.Response(200, content=b"secret")
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            assert await server.fetch_attachment(http, "https://spond.com/storage/a.pdf") == b"secret"
+            with pytest.raises(server.AttachmentRejected):
+                await server.fetch_attachment(http, "https://spond.com/storage/b.pdf")
+
+    async def test_fetch_size_cap_and_ok(self, monkeypatch):
+        monkeypatch.setattr(server, "ATTACHMENT_MAX_BYTES", 10)
+        body = {"/storage/big.pdf": b"x" * 11, "/storage/x.pdf": b"%PDF-1.4"}
+        transport = httpx.MockTransport(lambda r: httpx.Response(200, content=body[r.url.path]))
+        async with httpx.AsyncClient(transport=transport) as http:
+            assert await server.fetch_attachment(http, "https://spond.com/storage/x.pdf") == b"%PDF-1.4"
+            with pytest.raises(server.AttachmentRejected):
+                await server.fetch_attachment(http, "https://spond.com/storage/big.pdf")
+
+    async def test_foreign_pdf_link_not_fetched(self, att_service, mock_http, monkeypatch):
+        monkeypatch.setenv("DOCLING_URL", "https://docling.test")
+        msg = {**self.MSG, "clubMessage": {"attachments": [{"title": "a.pdf", "type": 2, "media": "https://evil.com/a.pdf"}]}}
+        att_service.get_chat_messages = AsyncMock(return_value=[msg])
+        result = await handle_tool_call(att_service, "get_attachment", {"id": "chat:CH:7:0"})
+        assert "Kan ikke lese filen" in result and "Lenke: https://evil.com/a.pdf" in result
+        assert not mock_http
+
     async def test_bad_ids(self, att_service):
         assert "Ugyldig" in await handle_tool_call(att_service, "get_attachment", {"id": "foo"})
         assert "Fant ikke vedlegg" in await handle_tool_call(att_service, "get_attachment", {"id": "post:POST_M:5"})

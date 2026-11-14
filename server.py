@@ -1033,6 +1033,40 @@ def http_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=120, follow_redirects=True)
 
 
+ATTACHMENT_HOST = "spond.com"
+
+
+class AttachmentRejected(Exception):
+    pass
+
+
+def allowed_attachment_url(url: str) -> bool:
+    try:
+        u = httpx.URL(url)
+    except (httpx.InvalidURL, TypeError):
+        return False
+    return u.scheme == "https" and u.host == ATTACHMENT_HOST and not u.userinfo and u.port in (None, 443)
+
+
+async def fetch_attachment(http: httpx.AsyncClient, url: str) -> bytes:
+    """Download a Spond file: https://spond.com only, same-host redirects, size capped while streaming."""
+    for _ in range(4):
+        if not allowed_attachment_url(url):
+            raise AttachmentRejected("ikke en Spond-fil")
+        async with http.stream("GET", url, follow_redirects=False) as r:
+            if r.is_redirect:
+                url = str(r.url.join(r.headers.get("location", "")))
+                continue
+            r.raise_for_status()
+            data = bytearray()
+            async for chunk in r.aiter_bytes():
+                data += chunk
+                if len(data) > ATTACHMENT_MAX_BYTES:
+                    raise AttachmentRejected("for stor")
+            return bytes(data)
+    raise AttachmentRejected("for mange omdirigeringer")
+
+
 async def find_attachment(service: SpondService, attachment_id: str) -> dict | str:
     """Resolve chat:<chat>:<msg>:<n>, post:<post>:<n> or comment:<post>:<comment>:<n>."""
     kind, _, rest = attachment_id.partition(":")
@@ -1087,12 +1121,10 @@ async def handle_get_attachment(service: SpondService, attachment_id: str) -> st
         return f"{header}\nPDF-lesing er ikke satt opp (DOCLING_URL mangler).\n{link}"
     try:
         async with http_client() as http:
-            r = await http.get(url)
-            r.raise_for_status()
-            data = r.content
-        if len(data) > ATTACHMENT_MAX_BYTES:
-            return f"{header}\nFilen er for stor til å lese ({len(data) // 1024 // 1024} MB).\n{link}"
+            data = await fetch_attachment(http, url)
         text = (await convert_pdf(docling_url, data, name)).strip()
+    except AttachmentRejected as e:
+        return f"{header}\nKan ikke lese filen ({e}).\n{link}"
     except httpx.HTTPError as e:
         logger.warning("get_attachment %s failed: %s", attachment_id, e)
         return f"{header}\nKlarte ikke å lese PDF-en ({type(e).__name__}).\n{link}"
