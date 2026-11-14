@@ -6,7 +6,7 @@ Tokens load once at start: rotate by rolling a new revision / restarting.
 Under the Python mcp SDK, caller() reflects the SSE opener, not each message.
 
 A group dir may also hold jwks.json: JWT (Kanidm ES256 at+jwt) verification for
-that group, mirroring mcpauth v0.3.0 jwt.go. Static tokens are tried first.
+that group, mirroring mcpauth v0.3.1 jwt.go. Static tokens are tried first.
 """
 
 import asyncio
@@ -33,6 +33,8 @@ JWKS_FILE = "jwks.json"
 CLOCK_SKEW = 60
 REFRESH_INTERVAL = 3600
 KID_REFETCH_GAP = 60
+EMPTY_REFETCH_GAP = 1
+SYNC_FETCH_TIMEOUT = 5
 MAX_JWT_LEN = 8 << 10
 MAX_JWKS_BYTES = 64 << 10
 RETRY_DELAYS = [1, 5, 30]
@@ -79,8 +81,9 @@ def _decode_json(seg: str):
         return None
 
 
-def fetch_jwks(url: str) -> dict[str, ec.EllipticCurvePublicKey]:
-    with http_client.stream("GET", url) as resp:
+def fetch_jwks(url: str, timeout: float | None = None) -> dict[str, ec.EllipticCurvePublicKey]:
+    kw = {} if timeout is None else {"timeout": timeout}
+    with http_client.stream("GET", url, **kw) as resp:
         if resp.status_code != 200:
             raise ValueError(f"status {resp.status_code}")
         body = b""
@@ -120,7 +123,9 @@ class _JWTVerifier:
         self.cfg = cfg
         self._lock = threading.Lock()
         self.keys: dict[str, ec.EllipticCurvePublicKey] = {}
+        self._fetch_lock = threading.Lock()
         self.last_fetch = 0.0
+        self.last_attempt = 0.0
 
     def start(self):
         threading.Thread(target=self._run, daemon=True, name="mcpauth-jwks").start()
@@ -135,32 +140,45 @@ class _JWTVerifier:
             self.refresh()
 
     def refresh(self) -> bool:
-        with self._lock:
-            self.last_fetch = time.monotonic()
-        return self._fetch()
+        with self._fetch_lock:
+            return self._fetch()
 
-    def _fetch(self) -> bool:
+    # Must hold _fetch_lock. last_attempt is stamped when the fetch ends, so the
+    # refetch gap runs from the end of a slow attempt.
+    def _fetch(self, timeout: float | None = None) -> bool:
         try:
-            keys = fetch_jwks(self.cfg["jwks_url"])
+            keys = fetch_jwks(self.cfg["jwks_url"], timeout)
         except Exception as e:
+            with self._lock:
+                self.last_attempt = time.monotonic()
             logger.warning("mcpauth: jwks fetch %s: %s", self.cfg["jwks_url"], e)
             return False
         with self._lock:
             self.keys = keys
+            self.last_attempt = self.last_fetch = time.monotonic()
         return True
 
-    async def key(self, kid: str):
+    def _cached(self, kid: str):
+        """Key for kid, and whether a refetch is allowed on a miss."""
         with self._lock:
-            k = self.keys.get(kid)
-            # No keys yet means the first fetch is still running or failed
-            # (cold start): fetch now instead of rejecting the token.
-            recent = time.monotonic() - self.last_fetch < KID_REFETCH_GAP
-            if k is not None or (self.keys and recent):
+            gap = KID_REFETCH_GAP if self.keys else EMPTY_REFETCH_GAP
+            return self.keys.get(kid), time.monotonic() - self.last_attempt >= gap
+
+    # Waiters queued behind a fetch re-check under _fetch_lock, so they wait for
+    # at most the one in-flight fetch and then use its result or fail fast.
+    def _key_sync(self, kid: str):
+        with self._fetch_lock:
+            k, ok = self._cached(kid)
+            if k is not None or not ok:
                 return k
-            self.last_fetch = time.monotonic()
-        await asyncio.to_thread(self._fetch)
-        with self._lock:
-            return self.keys.get(kid)
+            self._fetch(SYNC_FETCH_TIMEOUT)
+            return self._cached(kid)[0]
+
+    async def key(self, kid: str):
+        k, _ = self._cached(kid)
+        if k is not None:
+            return k
+        return await asyncio.to_thread(self._key_sync, kid)
 
     async def verify(self, bearer: bytes) -> str | None:
         if len(bearer) > MAX_JWT_LEN:

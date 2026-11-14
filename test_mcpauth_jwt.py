@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -182,7 +183,7 @@ def test_rejects(tmp_path, jwks):
 
 def test_unknown_kid_refetch_rate_limited(tmp_path, jwks):
     a, _ = setup(tmp_path, jwks)
-    a._groups["read"].jwt.last_fetch = 0.0
+    a._groups["read"].jwt.last_attempt = 0.0
     k2 = jwks.add("k2")
     before = jwks.calls
     assert call(a, "read", "Bearer " + sign(k2, {**HDR, "kid": "k2"}, claims()))[0] == 200
@@ -272,5 +273,68 @@ def test_cold_start_fetches_when_no_keys(tmp_path, jwks):
     v = a._groups["read"].jwt
     # First background fetch has started (last_fetch is recent) but not finished.
     v.keys = {}
-    v.last_fetch = time.monotonic()
+    v.last_attempt = 0.0
     assert call(a, "read", "Bearer " + sign(k, HDR, claims()))[0] == 200
+
+
+def verifier(jwks):
+    jwks.add("k1")
+    return mcpauth._JWTVerifier({**BASE})
+
+
+def forged(i):
+    return sign(ec.generate_private_key(ec.SECP256R1()), {**HDR, "kid": f"forged-{i}"}, claims()).encode()
+
+
+async def gather(v, toks):
+    return await asyncio.gather(*(v.verify(t) for t in toks))
+
+
+def test_cold_start_single_flight(jwks, monkeypatch):
+    v = verifier(jwks)
+    handler = jwks.handler
+
+    def slow(req):
+        time.sleep(0.2)
+        return handler(req)
+
+    monkeypatch.setattr(mcpauth, "http_client", httpx.Client(transport=httpx.MockTransport(slow)))
+    tok = sign(jwks.keys["k1"], HDR, claims()).encode()
+    assert asyncio.run(gather(v, [tok] * 10)) == ["varden"] * 10
+    assert jwks.calls == 1
+
+
+@pytest.mark.parametrize("loaded", [False, True], ids=["empty", "loaded"])
+def test_forged_kids_issuer_down_one_fetch(jwks, loaded):
+    v = verifier(jwks)
+    if loaded:
+        assert v.refresh()
+        v.last_attempt = 0.0
+        jwks.calls = 0
+    jwks.down = True
+
+    async def run():
+        assert await gather(v, [forged(i) for i in range(20)]) == [None] * 20
+        for i in range(20, 40):
+            assert await v.verify(forged(i)) is None
+
+    asyncio.run(run())
+    assert jwks.calls == 1
+    assert bool(v.keys) == loaded
+
+
+def test_slow_issuer_waiters_fail_fast(jwks, monkeypatch):
+    v = verifier(jwks)
+    handler = jwks.handler
+
+    def slow(req):
+        time.sleep(1.5)
+        jwks.down = True
+        return handler(req)
+
+    monkeypatch.setattr(mcpauth, "http_client", httpx.Client(transport=httpx.MockTransport(slow)))
+    tok = sign(jwks.keys["k1"], HDR, claims()).encode()
+    t = time.monotonic()
+    assert asyncio.run(gather(v, [tok] * 6)) == [None] * 6
+    assert time.monotonic() - t < 3
+    assert jwks.calls == 1
