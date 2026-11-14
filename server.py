@@ -1,5 +1,6 @@
 """Spond MCP server — service layer, tool definitions, and formatting."""
 
+import asyncio
 import logging
 import os
 import time
@@ -1224,3 +1225,61 @@ async def handle_tool_call(service: SpondService, name: str, arguments: dict | N
         return await handle_get_attachment(service, attachment_id)
     else:
         return f"Ukjent verktøy: {name}"
+
+
+WRITE_TOOLS = [
+    {
+        "name": "chat_reply",
+        "description": "Send a text reply to a Spond chat. Idempotent per draft_id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "chat_id": {"type": "string"},
+                "text": {"type": "string"},
+                "draft_id": {"type": "string"},
+            },
+            "required": ["chat_id", "text", "draft_id"],
+        },
+    }
+]
+
+# ponytail: in-process idempotency map, lost on restart; utkast's find_sent covers that case.
+_sent: dict[str, dict] = {}
+_write_lock = asyncio.Lock()
+
+
+async def chat_reply(svc: SpondService, chat_id: str, text: str, draft_id: str) -> dict:
+    if not chat_id or not text or not draft_id:
+        raise ValueError("chat_id, text and draft_id are required")
+    async with _write_lock:
+        if draft_id in _sent:
+            return _sent[draft_id]
+        client = svc._client
+        if not client.token:
+            await client.login()
+        if not client._chat_url:
+            await client._login_chat()
+        before = await svc._api_get(f"chats/{chat_id}/messages", chat=True) or []
+        seen = max((m.get("msgNum", 0) for m in before), default=0)
+        # spond 1.2.x send_message calls _continue_chat without await, so POST directly.
+        async with client.clientsession.post(
+            f"{client._chat_url}/messages",
+            headers={"auth": client._auth},
+            json={"chatId": chat_id, "text": text, "type": "TEXT"},
+        ) as r:
+            if r.status != 200:
+                raise RuntimeError(f"Spond svarte {r.status} på send")
+            body = await r.json(content_type=None)
+        msg_num = body.get("msgNum") if isinstance(body, dict) else None
+        if msg_num is None:
+            me = (await client.get_profile())["id"]
+            after = await svc._api_get(f"chats/{chat_id}/messages", chat=True) or []
+            mine = [
+                m["msgNum"]
+                for m in after
+                if m.get("user") == me and m.get("text") == text and m.get("msgNum", 0) > seen
+            ]
+            msg_num = max(mine) if mine else None
+        result = {"chat_id": chat_id, "msg_num": msg_num}
+        _sent[draft_id] = result
+        return result

@@ -21,7 +21,7 @@ from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Mount, Route
 
 import mcpauth
-from server import TOOLS, SpondService, handle_tool_call
+from server import TOOLS, WRITE_TOOLS, SpondService, chat_reply, handle_tool_call
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("spond-mcp")
@@ -164,10 +164,59 @@ async def lifespan(app):
     await auth._drop()
 
 
+write_server = Server("spond-write")
+write_sse = SseServerTransport("/write/messages/")
+
+
+@write_server.list_tools()
+async def list_write_tools() -> list[Tool]:
+    return [Tool(**t) for t in WRITE_TOOLS]
+
+
+@write_server.call_tool()
+async def call_write_tool(name: str, arguments: dict | None) -> list[TextContent]:
+    args = arguments or {}
+    try:
+        if name != "chat_reply":
+            raise ValueError(f"Ukjent verktøy: {name}")
+        svc = await auth.ensure()
+        sent = await chat_reply(svc, args.get("chat_id", ""), args.get("text", ""), args.get("draft_id", ""))
+        result = json.dumps(sent)
+    except LoginFailed as e:
+        result = str(e)
+    except Exception as e:
+        logger.exception("Write tool %s failed", name)
+        result = f"Feil: {e}"
+    return [TextContent(type="text", text=result)]
+
+
+async def handle_write_sse(request: Request):
+    async with write_sse.connect_sse(request.scope, request.receive, request._send) as (r, w):
+        await write_server.run(r, w, write_server.create_initialization_options())
+    return Response()
+
+
 def build_app(callers: mcpauth.Auth) -> Starlette:
+    write = []
+    if callers.has("write"):
+        write = [
+            Mount(
+                "/write",
+                app=callers.require(
+                    "write",
+                    Starlette(
+                        routes=[
+                            Route("/sse", handle_write_sse),
+                            Mount("/messages/", app=write_sse.handle_post_message),
+                        ]
+                    ),
+                ),
+            )
+        ]
     return Starlette(
         routes=[
             Route("/health", health),
+            *write,
             Mount(
                 "/",
                 app=callers.require(
