@@ -164,17 +164,17 @@ async def lifespan(app):
     await auth._drop()
 
 
-write_server = Server("spond-write")
-write_sse = SseServerTransport("/write/messages/")
+utkast_server = Server("spond-utkast")
+utkast_sse = SseServerTransport("/utkast/messages/")
 
 
-@write_server.list_tools()
-async def list_write_tools() -> list[Tool]:
+@utkast_server.list_tools()
+async def list_utkast_tools() -> list[Tool]:
     return [Tool(**t) for t in WRITE_TOOLS]
 
 
-@write_server.call_tool()
-async def call_write_tool(name: str, arguments: dict | None) -> list[TextContent]:
+@utkast_server.call_tool()
+async def call_utkast_tool(name: str, arguments: dict | None) -> list[TextContent]:
     args = arguments or {}
     try:
         if name != "chat_reply":
@@ -190,24 +190,24 @@ async def call_write_tool(name: str, arguments: dict | None) -> list[TextContent
     return [TextContent(type="text", text=result)]
 
 
-async def handle_write_sse(request: Request):
-    async with write_sse.connect_sse(request.scope, request.receive, request._send) as (r, w):
-        await write_server.run(r, w, write_server.create_initialization_options())
+async def handle_utkast_sse(request: Request):
+    async with utkast_sse.connect_sse(request.scope, request.receive, request._send) as (r, w):
+        await utkast_server.run(r, w, utkast_server.create_initialization_options())
     return Response()
 
 
 def build_app(callers: mcpauth.Auth) -> Starlette:
-    write = []
-    if callers.has("write"):
-        write = [
+    utkast = []
+    if callers.has("utkast"):
+        utkast = [
             Mount(
-                "/write",
+                "/utkast",
                 app=callers.require(
-                    "write",
+                    "utkast",
                     Starlette(
                         routes=[
-                            Route("/sse", handle_write_sse),
-                            Mount("/messages/", app=write_sse.handle_post_message),
+                            Route("/sse", handle_utkast_sse),
+                            Mount("/messages/", app=utkast_sse.handle_post_message),
                         ]
                     ),
                 ),
@@ -216,7 +216,7 @@ def build_app(callers: mcpauth.Auth) -> Starlette:
     return Starlette(
         routes=[
             Route("/health", health),
-            *write,
+            *utkast,
             Mount(
                 "/",
                 app=callers.require(

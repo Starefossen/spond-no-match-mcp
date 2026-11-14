@@ -86,15 +86,15 @@ def _client(tmp_path, groups):
     return TestClient(build_app(mcpauth.load(str(tmp_path))), raise_server_exceptions=False)
 
 
-def test_write_route_requires_write_group(tmp_path):
-    c = _client(tmp_path, {"read": "read-token-xyz-123", "write": "write-token-xyz-123"})
-    assert c.post("/write/messages/").status_code == 401
-    assert c.post("/write/messages/", headers={"Authorization": "Bearer read-token-xyz-123"}).status_code == 401
-    assert c.post("/write/messages/", headers={"Authorization": "Bearer write-token-xyz-123"}).status_code != 401
-    assert c.post("/messages/", headers={"Authorization": "Bearer write-token-xyz-123"}).status_code == 401
+def test_utkast_route_requires_utkast_group(tmp_path):
+    c = _client(tmp_path, {"read": "read-token-xyz-123", "utkast": "utkast-token-xyz-123"})
+    assert c.post("/utkast/messages/").status_code == 401
+    assert c.post("/utkast/messages/", headers={"Authorization": "Bearer read-token-xyz-123"}).status_code == 401
+    assert c.post("/utkast/messages/", headers={"Authorization": "Bearer utkast-token-xyz-123"}).status_code != 401
+    assert c.post("/messages/", headers={"Authorization": "Bearer utkast-token-xyz-123"}).status_code == 401
 
 
-def test_no_write_route_without_group(tmp_path):
+def test_no_utkast_route_without_group(tmp_path):
     c = _client(tmp_path, {"read": "read-token-xyz-123"})
-    r = c.post("/write/messages/", headers={"Authorization": "Bearer read-token-xyz-123"})
+    r = c.post("/utkast/messages/", headers={"Authorization": "Bearer read-token-xyz-123"})
     assert r.status_code == 404
