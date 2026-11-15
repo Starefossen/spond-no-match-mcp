@@ -21,6 +21,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 from cryptography.exceptions import InvalidSignature
@@ -41,7 +42,10 @@ RETRY_DELAYS = [1, 5, 30]
 _B64URL = re.compile(r"[A-Za-z0-9_-]*")
 _CONFIG_KEYS = {"issuer", "audience", "jwks_url", "required_scope", "callers"}
 
-http_client = httpx.Client(timeout=10, follow_redirects=False)
+FETCH_TIMEOUT = 10
+http_client = httpx.Client(timeout=FETCH_TIMEOUT, follow_redirects=False)
+# Own pool: waiters blocked behind a slow JWKS fetch must not starve asyncio's default executor.
+_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mcpauth")
 
 logger = logging.getLogger("mcpauth")
 _caller: contextvars.ContextVar[str] = contextvars.ContextVar("mcpauth_caller", default="")
@@ -83,6 +87,8 @@ def _decode_json(seg: str):
 
 def fetch_jwks(url: str, timeout: float | None = None) -> dict[str, ec.EllipticCurvePublicKey]:
     kw = {} if timeout is None else {"timeout": timeout}
+    # httpx timeouts apply per read, so a trickling server could hold _fetch_lock for long; cap the total.
+    deadline = time.monotonic() + (timeout or FETCH_TIMEOUT)
     with http_client.stream("GET", url, **kw) as resp:
         if resp.status_code != 200:
             raise ValueError(f"status {resp.status_code}")
@@ -91,6 +97,8 @@ def fetch_jwks(url: str, timeout: float | None = None) -> dict[str, ec.EllipticC
             body += chunk
             if len(body) > MAX_JWKS_BYTES:
                 raise ValueError("jwks too large")
+            if time.monotonic() > deadline:
+                raise ValueError("jwks fetch deadline exceeded")
     keys = {}
     for k in json.loads(body).get("keys") or []:
         if not isinstance(k, dict):
@@ -178,7 +186,7 @@ class _JWTVerifier:
         k, _ = self._cached(kid)
         if k is not None:
             return k
-        return await asyncio.to_thread(self._key_sync, kid)
+        return await asyncio.get_running_loop().run_in_executor(_pool, self._key_sync, kid)
 
     async def verify(self, bearer: bytes) -> str | None:
         if len(bearer) > MAX_JWT_LEN:

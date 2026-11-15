@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
@@ -338,3 +339,32 @@ def test_slow_issuer_waiters_fail_fast(jwks, monkeypatch):
     assert asyncio.run(gather(v, [tok] * 6)) == [None] * 6
     assert time.monotonic() - t < 3
     assert jwks.calls == 1
+
+
+def test_trickling_issuer_hits_total_deadline(monkeypatch):
+    def trickle():
+        for _ in range(10):
+            time.sleep(0.2)
+            yield b" "
+
+    client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, content=trickle())))
+    monkeypatch.setattr(mcpauth, "http_client", client)
+    t = time.monotonic()
+    with pytest.raises(ValueError, match="deadline"):
+        mcpauth.fetch_jwks(URL, timeout=0.5)
+    assert time.monotonic() - t < 1.5
+
+
+def test_key_lookup_survives_busy_default_executor(jwks):
+    v = verifier(jwks)
+    tok = sign(jwks.keys["k1"], HDR, claims()).encode()
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        busy = ThreadPoolExecutor(max_workers=1)
+        loop.set_default_executor(busy)
+        blocker = loop.run_in_executor(None, time.sleep, 2)
+        assert await asyncio.wait_for(v.verify(tok), 1) == "varden"
+        await blocker
+
+    asyncio.run(run())
