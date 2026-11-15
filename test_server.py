@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
+import conftest
 import server
 from conftest import (
     MOCK_EVENT_CANCELLED,
@@ -775,6 +776,8 @@ class TestServiceLifecycle:
 def callers_dir(tmp_path):
     (tmp_path / "read").mkdir()
     (tmp_path / "read" / "varden").write_text("test-secret-token-xyz\n")
+    (tmp_path / "minside").mkdir()
+    (tmp_path / "minside" / "minside").write_text("minside-secret-token-xyz\n")
     return tmp_path
 
 
@@ -812,6 +815,16 @@ class TestBearerAuth:
     def test_messages_rejected_without_token(self, client):
         resp = client.post("/messages/")
         assert resp.status_code == 401
+
+    def test_minside_groups_do_not_mix(self, client):
+        assert client.get("/api/minside/today?kid=x").status_code == 401
+        assert (
+            client.get(
+                "/api/minside/today?kid=x", headers={"Authorization": "Bearer test-secret-token-xyz"}
+            ).status_code
+            == 401
+        )
+        assert client.get("/sse", headers={"Authorization": "Bearer minside-secret-token-xyz"}).status_code == 401
 
     def test_accepted_with_valid_token(self, client):
         resp = client.post("/messages/", headers={"Authorization": "Bearer test-secret-token-xyz"})
@@ -963,7 +976,10 @@ class TestAttachments:
 
     async def test_foreign_pdf_link_not_fetched(self, att_service, mock_http, monkeypatch):
         monkeypatch.setenv("DOCLING_URL", "https://docling.test")
-        msg = {**self.MSG, "clubMessage": {"attachments": [{"title": "a.pdf", "type": 2, "media": "https://evil.com/a.pdf"}]}}
+        msg = {
+            **self.MSG,
+            "clubMessage": {"attachments": [{"title": "a.pdf", "type": 2, "media": "https://evil.com/a.pdf"}]},
+        }
         att_service.get_chat_messages = AsyncMock(return_value=[msg])
         result = await handle_tool_call(att_service, "get_attachment", {"id": "chat:CH:7:0"})
         assert "Kan ikke lese filen" in result and "Lenke: https://evil.com/a.pdf" in result
@@ -973,3 +989,21 @@ class TestAttachments:
         assert "Ugyldig" in await handle_tool_call(att_service, "get_attachment", {"id": "foo"})
         assert "Fant ikke vedlegg" in await handle_tool_call(att_service, "get_attachment", {"id": "post:POST_M:5"})
         assert "påkrevd" in await handle_tool_call(att_service, "get_attachment", {})
+
+
+async def test_kid_events_only_own(service, mock_spond_client):
+    events = await server.kid_events(service, "Oliver", days=7)
+    assert [(e["heading"], e["answer"]) for e in events] == [
+        ("Trening", "accepted"),
+        ("Seriekamp vs Havnes", "unanswered"),
+    ]
+    assert all(set(e) == {"heading", "start", "end", "location", "cancelled", "answer"} for e in events)
+    assert [e["answer"] for e in await server.kid_events(service, "Emma", days=7)] == ["accepted"]
+    assert await server.kid_events(service, "Ukjent") is None
+    assert await server.kid_events(service, "") is None
+
+
+async def test_kid_events_skips_events_kid_is_not_invited_to(service, mock_spond_client):
+    mock_spond_client.get_events.side_effect = None
+    mock_spond_client.get_events.return_value = conftest.MOCK_EVENTS_SOLVIK
+    assert await server.kid_events(service, "Oliver", days=7) == []

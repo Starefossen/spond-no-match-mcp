@@ -17,11 +17,11 @@ from spond import AuthenticationError
 from spond.spond import Spond
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, Response
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 
 import mcpauth
-from server import TOOLS, SpondService, handle_tool_call
+from server import TOOLS, SpondService, handle_tool_call, kid_events
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("spond-mcp")
@@ -105,16 +105,19 @@ class SpondAuth:
             self.failed_at = None
             return self.service
 
-    async def call(self, name: str, arguments: dict | None) -> str:
+    async def run(self, fn):
         svc = await self.ensure()
         try:
-            return await handle_tool_call(svc, name, arguments)
+            return await fn(svc)
         except Unauthorized:
             logger.info("Spond token rejected; logging in again")
             async with self._lock:
                 if self.service is svc:
                     await self._drop()
-            return await handle_tool_call(await self.ensure(), name, arguments)
+            return await fn(await self.ensure())
+
+    async def call(self, name: str, arguments: dict | None) -> str:
+        return await self.run(lambda svc: handle_tool_call(svc, name, arguments))
 
 
 auth = SpondAuth()
@@ -154,6 +157,21 @@ async def handle_sse(request: Request):
     return Response()
 
 
+async def minside_today(request: Request):
+    """GET /api/minside/today?kid=<name>: the kid's Spond events for the next
+    day (RFC-011). mcpauth group "minside"; Min side resolves the kid from the
+    Kanidm login and spond trusts the caller for that."""
+    kid = request.query_params.get("kid", "")
+    try:
+        events = await auth.run(lambda svc: kid_events(svc, kid))
+    except Exception as e:
+        logger.warning("minside today: %s", type(e).__name__)
+        return PlainTextResponse("Spond unavailable", status_code=503)
+    if events is None:
+        return PlainTextResponse("Unknown kid", status_code=404)
+    return JSONResponse({"events": events}, headers={"Cache-Control": "no-store"})
+
+
 async def health(request: Request):
     return PlainTextResponse("ok")
 
@@ -168,6 +186,7 @@ def build_app(callers: mcpauth.Auth) -> Starlette:
     return Starlette(
         routes=[
             Route("/health", health),
+            Mount("/api/minside", app=callers.require("minside", Starlette(routes=[Route("/today", minside_today)]))),
             Mount(
                 "/",
                 app=callers.require(

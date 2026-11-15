@@ -95,6 +95,14 @@ spec:
                 path: read/varden
               - key: operator
                 path: read/operator
+          # Min side (RFC-011): GET /api/minside/today only, a group of its own. Optional:
+          # until the key exists the group is empty and refuses everyone.
+          - secret:
+              name: mcp-auth-token
+              optional: true
+              items:
+              - key: minside
+                path: minside/minside
           - configMap:
               name: spond-jwks
               items:

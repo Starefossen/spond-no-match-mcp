@@ -104,6 +104,8 @@ curl -H "Authorization: Bearer $(cat /tmp/callers/read/me)" http://localhost:808
 
 In Kubernetes the callers are projected from Secret `mcp-auth-token` (see `config/knative-service.yaml`).
 
+`GET /api/minside/today?kid=<name>` (RFC-011): one kid's Spond events for the next 24 hours as JSON for Min side: `heading`, `start`, `end`, `location`, `cancelled`, `answer`. Only events the kid is invited to, from the kid's groups in `KIDS_CONFIG`; 404 for an unknown kid. Group `minside` only (key `minside`, optional mount); the `read` group cannot call it and `minside` cannot call the MCP tools. Min side decides which kid a login may see; spond trusts the caller.
+
 `read/jwks.json` (ConfigMap `spond-jwks`, `config/spond-jwks.yaml`) also enables Kanidm JWTs, same rules as mcpauth v0.3.0: ES256 `at+jwt` only, `iss`/`aud`/`exp`/`nbf` with 60 s skew, required scope, and `callers` as a `sub` allowlist (unknown `sub` gets 401). The JWKS loads in the background over HTTPS without redirects, refreshes hourly and on an unknown `kid` at most once a minute. Static tokens are tried first and keep working while Kanidm is down.
 
 ## Login failures, password change and 2FA

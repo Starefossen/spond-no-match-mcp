@@ -1224,3 +1224,34 @@ async def handle_tool_call(service: SpondService, name: str, arguments: dict | N
         return await handle_get_attachment(service, attachment_id)
     else:
         return f"Ukjent verktøy: {name}"
+
+
+async def kid_events(service: SpondService, kid_name: str, days: int = 1) -> list[dict] | None:
+    """Min side (RFC-011): the kid's own events, None for an unknown kid. Only
+    events the kid is invited to, from the kid's own groups; no description,
+    no other members."""
+    kid_groups = service.get_kid_group_names(kid_name)
+    if not kid_name or not kid_groups:
+        return None
+    family = await service.resolve_family_members()
+    me = {mid for mid, name in family.items() if name.lower() == kid_name.lower()}
+    groups = await service.get_groups()
+    out: dict[str, dict] = {}
+    for gname in kid_groups:
+        gid = service.find_group_id(gname, groups)
+        if not gid:
+            continue
+        for e in await service.get_events(days=days, group_id=gid):
+            r = e.get("responses", {})
+            answer = next((a for a in ("accepted", "declined", "unanswered") if me & set(r.get(f"{a}Ids", []))), "")
+            if not answer and not me & set(r.get("waitinglistIds", []) + r.get("unconfirmedIds", [])):
+                continue
+            out[e.get("id", "")] = {
+                "heading": e.get("heading", ""),
+                "start": e.get("startTimestamp", ""),
+                "end": e.get("endTimestamp", ""),
+                "location": e.get("location", {}).get("feature", ""),
+                "cancelled": bool(e.get("cancelled")),
+                "answer": answer,
+            }
+    return sorted(out.values(), key=lambda e: e["start"])
