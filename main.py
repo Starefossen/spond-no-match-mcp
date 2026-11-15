@@ -157,13 +157,23 @@ async def handle_sse(request: Request):
     return Response()
 
 
-async def minside_today(request: Request):
-    """GET /api/minside/today?kid=<name>: the kid's Spond events for the next
-    day (RFC-011). mcpauth group "minside"; Min side resolves the kid from the
-    Kanidm login and spond trusts the caller for that."""
-    kid = request.query_params.get("kid", "")
+def minside_days(raw: str | None) -> int:
+    """The days query parameter, 1 to 7; anything else is 1."""
     try:
-        events = await auth.run(lambda svc: kid_events(svc, kid))
+        return min(max(int(raw or 1), 1), 7)
+    except ValueError:
+        return 1
+
+
+async def minside_today(request: Request):
+    """GET /api/minside/today?kid=<name>[&days=N]: the kid's Spond events for
+    the next day, or N days capped at 7 (RFC-011). mcpauth group "minside";
+    Min side resolves the kid from the Kanidm login and spond trusts the
+    caller for that."""
+    kid = request.query_params.get("kid", "")
+    days = minside_days(request.query_params.get("days"))
+    try:
+        events = await auth.run(lambda svc: kid_events(svc, kid, days))
     except Exception as e:
         logger.warning("minside today: %s", type(e).__name__)
         return PlainTextResponse("Spond unavailable", status_code=503)

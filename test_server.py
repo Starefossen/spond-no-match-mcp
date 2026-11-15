@@ -839,6 +839,12 @@ class TestBearerAuth:
         assert resp.status_code != 401
 
 
+def test_minside_days_capped():
+    from main import minside_days
+
+    assert [minside_days(v) for v in (None, "", "3", "7", "30", "0", "-2", "x")] == [1, 1, 3, 7, 7, 1, 1, 1]
+
+
 def test_load_refuses_missing_config(tmp_path):
     import mcpauth
 
