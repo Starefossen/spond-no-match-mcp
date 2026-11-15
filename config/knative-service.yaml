@@ -103,6 +103,14 @@ spec:
               items:
               - key: minside
                 path: minside/minside
+          # Min side's own key for spond (one key per upstream). The shared key above
+          # goes once min-side runs on this one.
+          - secret:
+              name: mcp-auth-token
+              optional: true
+              items:
+              - key: minside-spond
+                path: minside/minside-spond
           - configMap:
               name: spond-jwks
               items:
