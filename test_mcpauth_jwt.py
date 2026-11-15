@@ -351,7 +351,7 @@ def test_trickling_issuer_hits_total_deadline(monkeypatch):
     monkeypatch.setattr(mcpauth, "http_client", client)
     t = time.monotonic()
     with pytest.raises(ValueError, match="deadline"):
-        mcpauth.fetch_jwks(URL, timeout=0.5)
+        mcpauth.fetch_jwks(URL + "/trickle", timeout=0.5)
     assert time.monotonic() - t < 1.5
 
 
@@ -368,3 +368,35 @@ def test_key_lookup_survives_busy_default_executor(jwks):
         await blocker
 
     asyncio.run(run())
+
+
+def test_trickling_headers_hit_total_deadline(monkeypatch):
+    import socket
+    import threading as th
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen()
+    stop = th.Event()
+
+    def serve():
+        c, _ = srv.accept()
+        c.recv(4096)
+        c.sendall(b"HTTP/1.1 200 OK\r\n")
+        while not stop.wait(0.2):
+            try:
+                c.sendall(b"X-Pad: a\r\n")
+            except OSError:
+                break
+        c.close()
+
+    th.Thread(target=serve, daemon=True).start()
+    monkeypatch.setattr(mcpauth, "http_client", httpx.Client())
+    t = time.monotonic()
+    try:
+        with pytest.raises(ValueError, match="deadline"):
+            mcpauth.fetch_jwks(f"http://127.0.0.1:{srv.getsockname()[1]}/keys", timeout=0.5)
+        assert time.monotonic() - t < 0.8
+    finally:
+        stop.set()
+        srv.close()

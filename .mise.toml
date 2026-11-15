@@ -27,8 +27,8 @@ if kubectl get secret spond-credentials -n mcp &>/dev/null; then
   [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Cancelled."; exit 0; }
 fi
 
-read -rp "Spond username (email): " username
-read -rsp "Spond password: " password
+IFS= read -rp "Spond username (email): " username
+IFS= read -rsp "Spond password: " password
 echo ""
 
 kubectl create secret generic spond-credentials -n mcp \

@@ -85,20 +85,45 @@ def _decode_json(seg: str):
         return None
 
 
+_inflight: dict[str, threading.Thread] = {}
+_inflight_lock = threading.Lock()
+
+
+def _get_body(url: str, timeout: float, out: list) -> None:
+    try:
+        with http_client.stream("GET", url, timeout=timeout) as resp:
+            if resp.status_code != 200:
+                raise ValueError(f"status {resp.status_code}")
+            body = b""
+            for chunk in resp.iter_bytes():
+                body += chunk
+                if len(body) > MAX_JWKS_BYTES:
+                    raise ValueError("jwks too large")
+        out.append(body)
+    except Exception as e:
+        out.append(e)
+
+
 def fetch_jwks(url: str, timeout: float | None = None) -> dict[str, ec.EllipticCurvePublicKey]:
-    kw = {} if timeout is None else {"timeout": timeout}
-    # httpx timeouts apply per read, so a trickling server could hold _fetch_lock for long; cap the total.
-    deadline = time.monotonic() + (timeout or FETCH_TIMEOUT)
-    with http_client.stream("GET", url, **kw) as resp:
-        if resp.status_code != 200:
-            raise ValueError(f"status {resp.status_code}")
-        body = b""
-        for chunk in resp.iter_bytes():
-            body += chunk
-            if len(body) > MAX_JWKS_BYTES:
-                raise ValueError("jwks too large")
-            if time.monotonic() > deadline:
-                raise ValueError("jwks fetch deadline exceeded")
+    # httpx timeouts apply per read, so trickled headers or body could run far past
+    # them. Run the request in a daemon thread and give up at the total deadline,
+    # like Go's Client.Timeout. ponytail: an abandoned request keeps its thread until
+    # the server stops; at most one per URL, later fetches fail fast meanwhile.
+    timeout = timeout or FETCH_TIMEOUT
+    with _inflight_lock:
+        prev = _inflight.get(url)
+        if prev is not None and prev.is_alive():
+            raise ValueError("previous jwks fetch still running")
+        out: list = []
+        t = threading.Thread(target=_get_body, args=(url, timeout, out), daemon=True, name="mcpauth-fetch")
+        _inflight[url] = t
+        t.start()
+    t.join(timeout)
+    if not out:
+        raise ValueError("jwks fetch deadline exceeded")
+    if isinstance(out[0], Exception):
+        raise out[0]
+    body = out[0]
     keys = {}
     for k in json.loads(body).get("keys") or []:
         if not isinstance(k, dict):
