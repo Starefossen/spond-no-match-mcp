@@ -90,6 +90,7 @@ _inflight_lock = threading.Lock()
 
 
 def _get_body(url: str, timeout: float, out: list) -> None:
+    deadline = time.monotonic() + timeout
     try:
         with http_client.stream("GET", url, timeout=timeout) as resp:
             if resp.status_code != 200:
@@ -99,6 +100,8 @@ def _get_body(url: str, timeout: float, out: list) -> None:
                 body += chunk
                 if len(body) > MAX_JWKS_BYTES:
                     raise ValueError("jwks too large")
+                if time.monotonic() > deadline:
+                    raise ValueError("jwks fetch deadline exceeded")
         out.append(body)
     except Exception as e:
         out.append(e)
@@ -116,9 +119,11 @@ def fetch_jwks(url: str, timeout: float | None = None) -> dict[str, ec.EllipticC
             raise ValueError("previous jwks fetch still running")
         out: list = []
         t = threading.Thread(target=_get_body, args=(url, timeout, out), daemon=True, name="mcpauth-fetch")
-        _inflight[url] = t
         t.start()
     t.join(timeout)
+    if t.is_alive():
+        with _inflight_lock:
+            _inflight[url] = t
     if not out:
         raise ValueError("jwks fetch deadline exceeded")
     if isinstance(out[0], Exception):

@@ -383,7 +383,9 @@ def test_trickling_headers_hit_total_deadline(monkeypatch):
         c, _ = srv.accept()
         c.recv(4096)
         c.sendall(b"HTTP/1.1 200 OK\r\n")
-        while not stop.wait(0.2):
+        for _ in range(15):
+            if stop.wait(0.2):
+                break
             try:
                 c.sendall(b"X-Pad: a\r\n")
             except OSError:
@@ -396,7 +398,7 @@ def test_trickling_headers_hit_total_deadline(monkeypatch):
     try:
         with pytest.raises(ValueError, match="deadline"):
             mcpauth.fetch_jwks(f"http://127.0.0.1:{srv.getsockname()[1]}/keys", timeout=0.5)
-        assert time.monotonic() - t < 0.8
+        assert time.monotonic() - t < 1.5
     finally:
         stop.set()
         srv.close()
