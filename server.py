@@ -97,14 +97,18 @@ class SpondService:
                 return kid.get("groups", [])
         return []
 
-    async def get_events(self, days: int = 7, group_id: str | None = None, from_days: int = 0) -> list[dict]:
-        cache_key = f"events:{days}:{from_days}:{group_id or 'all'}"
+    async def get_events(
+        self, days: int = 7, group_id: str | None = None, from_days: int = 0, from_midnight: bool = False
+    ) -> list[dict]:
+        cache_key = f"events:{days}:{from_days}:{group_id or 'all'}:{from_midnight}"
         cached = self._get_cached(cache_key, self.EVENTS_TTL)
         if cached is not None:
             return cached
 
         now = datetime.now(UTC)
         min_start = now + timedelta(days=from_days) if from_days > 0 else now
+        if from_midnight:
+            min_start = now.astimezone(LOCAL_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
         events = await self._client.get_events(
             min_start=min_start,
             max_end=now + timedelta(days=from_days + days),
@@ -1241,10 +1245,13 @@ async def kid_events(service: SpondService, kid_name: str, days: int = 1) -> lis
         gid = service.find_group_id(gname, groups)
         if not gid:
             continue
-        for e in await service.get_events(days=days, group_id=gid):
+        for e in await service.get_events(days=days, group_id=gid, from_midnight=True):
             r = e.get("responses", {})
-            answer = next((a for a in ("accepted", "declined", "unanswered") if me & set(r.get(f"{a}Ids", []))), "")
-            if not answer and not me & set(r.get("waitinglistIds", []) + r.get("unconfirmedIds", [])):
+            if not me & {
+                i
+                for k in ("accepted", "declined", "unanswered", "waitinglist", "unconfirmed")
+                for i in r.get(f"{k}Ids", [])
+            }:
                 continue
             out[e.get("id", "")] = {
                 "heading": e.get("heading", ""),
@@ -1252,6 +1259,5 @@ async def kid_events(service: SpondService, kid_name: str, days: int = 1) -> lis
                 "end": e.get("endTimestamp", ""),
                 "location": e.get("location", {}).get("feature", ""),
                 "cancelled": bool(e.get("cancelled")),
-                "answer": answer,
             }
     return sorted(out.values(), key=lambda e: e["start"])

@@ -225,6 +225,14 @@ class TestSpondServiceCache:
         assert diff == 56  # days is the window size
 
     @pytest.mark.asyncio
+    async def test_from_midnight_starts_at_oslo_midnight(self, service):
+        await service.get_events(days=1, from_midnight=True)
+        min_start = service._client.get_events.call_args.kwargs["min_start"]
+        local = min_start.astimezone(server.LOCAL_TZ)
+        assert (local.hour, local.minute, local.second) == (0, 0, 0)
+        assert min_start <= datetime.now(UTC)
+
+    @pytest.mark.asyncio
     async def test_clear_cache(self, service):
         await service.get_groups()
         await service.resolve_family_members()
@@ -993,12 +1001,9 @@ class TestAttachments:
 
 async def test_kid_events_only_own(service, mock_spond_client):
     events = await server.kid_events(service, "Oliver", days=7)
-    assert [(e["heading"], e["answer"]) for e in events] == [
-        ("Trening", "accepted"),
-        ("Seriekamp vs Havnes", "unanswered"),
-    ]
-    assert all(set(e) == {"heading", "start", "end", "location", "cancelled", "answer"} for e in events)
-    assert [e["answer"] for e in await server.kid_events(service, "Emma", days=7)] == ["accepted"]
+    assert [e["heading"] for e in events] == ["Trening", "Seriekamp vs Havnes"]
+    assert all(set(e) == {"heading", "start", "end", "location", "cancelled"} for e in events)
+    assert [e["heading"] for e in await server.kid_events(service, "Emma", days=7)] == ["Trening"]
     assert await server.kid_events(service, "Ukjent") is None
     assert await server.kid_events(service, "") is None
 
