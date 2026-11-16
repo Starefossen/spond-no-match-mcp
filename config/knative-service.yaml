@@ -95,16 +95,7 @@ spec:
                 path: read/varden
               - key: operator
                 path: read/operator
-          # Min side (RFC-011): GET /api/minside/today only, a group of its own. Optional:
-          # until the key exists the group is empty and refuses everyone.
-          - secret:
-              name: mcp-auth-token
-              optional: true
-              items:
-              - key: minside
-                path: minside/minside
-          # Min side's own key for spond (one key per upstream). The shared key above
-          # goes once min-side runs on this one.
+          # Min side's own key for spond (GET /api/minside/today, group minside).
           - secret:
               name: mcp-auth-token
               optional: true
