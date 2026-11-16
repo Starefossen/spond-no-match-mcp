@@ -106,6 +106,8 @@ In Kubernetes the callers are projected from Secret `mcp-auth-token` (see `confi
 
 `GET /api/minside/today?kid=<name>` (RFC-011): one kid's Spond events for the next 24 hours as JSON for Min side: `heading`, `start`, `end`, `location`, `cancelled`, `answer`. Only events the kid is invited to, from the kid's groups in `KIDS_CONFIG`; 404 for an unknown kid. Group `minside` only (key `minside`, optional mount); the `read` group cannot call it and `minside` cannot call the MCP tools. Min side decides which kid a login may see; spond trusts the caller.
 
+`GET /api/exercise/days?kid=<name>[&days=N]` (RFC-026 §12): minutes per Oslo day of the kid's ended, not cancelled Spond events with «trening» in the heading that the kid said yes to, N days back (1–14, default 2): `{"days":[{"day","minutes"}]}`. No names or places. Spond does not report attendance, so fleet stores these as unverified exercise. Group `exercise` only (key `fleet-spond`, optional mount).
+
 `read/jwks.json` (ConfigMap `spond-jwks`, `config/spond-jwks.yaml`) also enables Kanidm JWTs, same rules as mcpauth v0.3.0: ES256 `at+jwt` only, `iss`/`aud`/`exp`/`nbf` with 60 s skew, required scope, and `callers` as a `sub` allowlist (unknown `sub` gets 401). The JWKS loads in the background over HTTPS without redirects, refreshes hourly and on an unknown `kid` at most once a minute. Static tokens are tried first and keep working while Kanidm is down.
 
 ## Login failures, password change and 2FA

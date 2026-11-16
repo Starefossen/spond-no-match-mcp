@@ -102,6 +102,13 @@ spec:
               items:
               - key: minside-spond
                 path: minside/minside-spond
+          # fleet's own key (GET /api/exercise/days, group exercise; RFC-026 §12).
+          - secret:
+              name: mcp-auth-token
+              optional: true
+              items:
+              - key: fleet-spond
+                path: exercise/fleet-spond
           - configMap:
               name: spond-jwks
               items:

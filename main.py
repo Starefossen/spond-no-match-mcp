@@ -21,7 +21,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 
 import mcpauth
-from server import TOOLS, SpondService, handle_tool_call, kid_events
+from server import TOOLS, SpondService, handle_tool_call, kid_events, kid_trainings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("spond-mcp")
@@ -182,6 +182,25 @@ async def minside_today(request: Request):
     return JSONResponse({"events": events}, headers={"Cache-Control": "no-store"})
 
 
+async def exercise_days(request: Request):
+    """GET /api/exercise/days?kid=<name>[&days=N]: minutes of the kid's ended
+    Spond trainings per day, N days back (1-14, default 2). mcpauth group
+    "exercise" (fleet's own key, RFC-026 §12); no names or places."""
+    kid = request.query_params.get("kid", "")
+    try:
+        days = min(max(int(request.query_params.get("days") or 2), 1), 14)
+    except ValueError:
+        days = 2
+    try:
+        out = await auth.run(lambda svc: kid_trainings(svc, kid, days))
+    except Exception as e:
+        logger.warning("exercise days: %s", type(e).__name__)
+        return PlainTextResponse("Spond unavailable", status_code=503)
+    if out is None:
+        return PlainTextResponse("Unknown kid", status_code=404)
+    return JSONResponse({"days": out}, headers={"Cache-Control": "no-store"})
+
+
 async def health(request: Request):
     return PlainTextResponse("ok")
 
@@ -197,6 +216,9 @@ def build_app(callers: mcpauth.Auth) -> Starlette:
         routes=[
             Route("/health", health),
             Mount("/api/minside", app=callers.require("minside", Starlette(routes=[Route("/today", minside_today)]))),
+            Mount(
+                "/api/exercise", app=callers.require("exercise", Starlette(routes=[Route("/days", exercise_days)]))
+            ),
             Mount(
                 "/",
                 app=callers.require(

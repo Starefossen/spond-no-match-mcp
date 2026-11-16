@@ -786,6 +786,8 @@ def callers_dir(tmp_path):
     (tmp_path / "read" / "varden").write_text("test-secret-token-xyz\n")
     (tmp_path / "minside").mkdir()
     (tmp_path / "minside" / "minside").write_text("minside-secret-token-xyz\n")
+    (tmp_path / "exercise").mkdir()
+    (tmp_path / "exercise" / "fleet").write_text("exercise-secret-token-xyz\n")
     return tmp_path
 
 
@@ -823,6 +825,12 @@ class TestBearerAuth:
     def test_messages_rejected_without_token(self, client):
         resp = client.post("/messages/")
         assert resp.status_code == 401
+
+    def test_exercise_group_only(self, client):
+        assert client.get("/api/exercise/days?kid=x").status_code == 401
+        for tok in ("test-secret-token-xyz", "minside-secret-token-xyz"):
+            assert client.get("/api/exercise/days?kid=x", headers={"Authorization": f"Bearer {tok}"}).status_code == 401
+        assert client.get("/sse", headers={"Authorization": "Bearer exercise-secret-token-xyz"}).status_code == 401
 
     def test_minside_groups_do_not_mix(self, client):
         assert client.get("/api/minside/today?kid=x").status_code == 401
@@ -1012,6 +1020,16 @@ async def test_kid_events_only_own(service, mock_spond_client):
     assert [e["heading"] for e in await server.kid_events(service, "Emma", days=7)] == ["Trening"]
     assert await server.kid_events(service, "Ukjent") is None
     assert await server.kid_events(service, "") is None
+
+
+async def test_kid_trainings_counts_ended_accepted_trainings(service, mock_spond_client):
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 2, 26, 12, tzinfo=UTC)
+    # Trening 23.02 17:00-18:30 UTC, Oliver accepted; the match is not a training.
+    assert await server.kid_trainings(service, "Oliver", 7, now) == [{"day": "2026-02-23", "minutes": 90}]
+    assert await server.kid_trainings(service, "Oliver", 7, datetime(2026, 2, 23, 18, tzinfo=UTC)) == []
+    assert await server.kid_trainings(service, "Ukjent", 7, now) is None
 
 
 async def test_kid_events_skips_events_kid_is_not_invited_to(service, mock_spond_client):

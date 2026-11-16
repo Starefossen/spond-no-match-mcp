@@ -1261,3 +1261,41 @@ async def kid_events(service: SpondService, kid_name: str, days: int = 1) -> lis
                 "cancelled": bool(e.get("cancelled")),
             }
     return sorted(out.values(), key=lambda e: e["start"])
+
+
+async def kid_trainings(
+    service: SpondService, kid_name: str, days: int, now: datetime | None = None
+) -> list[dict] | None:
+    """fleet (RFC-026 §12): minutes of ended, not cancelled «trening» events the
+    kid said yes to, per Oslo day over the last `days` days. None for an unknown
+    kid. No names, places or other members; Spond does not report whether the
+    kid actually came, so fleet marks these unverified."""
+    kid_groups = service.get_kid_group_names(kid_name)
+    if not kid_name or not kid_groups:
+        return None
+    family = await service.resolve_family_members()
+    me = {mid for mid, name in family.items() if name.lower() == kid_name.lower()}
+    now = now or datetime.now(UTC)
+    groups = await service.get_groups()
+    seen: set[str] = set()
+    out: dict[str, int] = {}
+    for gname in kid_groups:
+        gid = service.find_group_id(gname, groups)
+        if not gid:
+            continue
+        for e in await service._client.get_events(min_start=now - timedelta(days=days), max_end=now, group_id=gid):
+            start, end = parse_timestamp(e.get("startTimestamp", "")), parse_timestamp(e.get("endTimestamp", ""))
+            if (
+                e.get("id") in seen
+                or e.get("cancelled")
+                or "trening" not in e.get("heading", "").lower()
+                or not me & set(e.get("responses", {}).get("acceptedIds", []))
+                or not start
+                or not end
+                or end > now
+            ):
+                continue
+            seen.add(e.get("id"))
+            day = start.astimezone(LOCAL_TZ).date().isoformat()
+            out[day] = out.get(day, 0) + int((end - start).total_seconds() // 60)
+    return [{"day": d, "minutes": m} for d, m in sorted(out.items())]
