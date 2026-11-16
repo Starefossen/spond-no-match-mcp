@@ -1036,3 +1036,25 @@ async def test_kid_events_skips_events_kid_is_not_invited_to(service, mock_spond
     mock_spond_client.get_events.side_effect = None
     mock_spond_client.get_events.return_value = conftest.MOCK_EVENTS_SOLVIK
     assert await server.kid_events(service, "Oliver", days=7) == []
+
+
+async def test_kid_trainings_any_yes_in_exercise_groups_except_meetings(service, mock_spond_client):
+    from datetime import UTC, datetime
+
+    def ev(i, heading, group, h):
+        return {
+            "id": i,
+            "heading": heading,
+            "startTimestamp": f"2026-03-0{h}T17:00:00.000+00:00",
+            "endTimestamp": f"2026-03-0{h}T18:00:00.000+00:00",
+            "responses": {"acceptedIds": ["MEMBER_OLIVER"]},
+        }
+
+    events = {
+        "GROUP_FJORDVIK": [ev("a", "Seriekamp", 0, 2), ev("b", "Foreldremøte", 0, 3), ev("c", "Dugnad", 0, 3)],
+        "GROUP_NORDVIK": [ev("d", "Trening robot", 0, 4)],
+    }
+    mock_spond_client.get_events = AsyncMock(side_effect=lambda **kw: events.get(kw.get("group_id"), []))
+    now = datetime(2026, 3, 6, 12, tzinfo=UTC)
+    assert await server.kid_trainings(service, "Oliver", 7, now) == [{"day": "2026-03-02", "minutes": 60}]
+    assert await server.kid_trainings(service, "Emma", 7, now) == []

@@ -174,7 +174,11 @@ MOCK_EVENT_DETAIL = {
 MOCK_ALL_EVENTS = MOCK_EVENTS_FJORDVIK + MOCK_EVENTS_SOLVIK
 
 KIDS_CONFIG = [
-    {"name": "Oliver", "groups": ["Fjordvik FK G2013", "Nordvik skole kull 2014"]},
+    {
+        "name": "Oliver",
+        "groups": ["Fjordvik FK G2013", "Nordvik skole kull 2014"],
+        "exercise_groups": ["Fjordvik FK G2013"],
+    },
     {"name": "Emma", "groups": ["Solvik IL 2017"]},
 ]
 

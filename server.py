@@ -1263,16 +1263,22 @@ async def kid_events(service: SpondService, kid_name: str, days: int = 1) -> lis
     return sorted(out.values(), key=lambda e: e["start"])
 
 
+# Hans 2026-11-16: every yes in an exercise group counts, except these.
+NOT_EXERCISE = ("møte", "dugnad", "ryddehjelp", "ballhenter", "foreldre", "sosial", "fest", "pizza")
+
+
 async def kid_trainings(
     service: SpondService, kid_name: str, days: int, now: datetime | None = None
 ) -> list[dict] | None:
-    """fleet (RFC-026 §12): minutes of ended, not cancelled «trening» events the
-    kid said yes to, per Oslo day over the last `days` days. None for an unknown
+    """fleet (RFC-026 §12): minutes of ended, not cancelled events in the kid's
+    exercise groups that the kid said yes to, per Oslo day over the last `days`
+    days; headings with a NOT_EXERCISE word are skipped. None for an unknown
     kid. No names, places or other members; Spond does not report whether the
     kid actually came, so fleet marks these unverified."""
-    kid_groups = service.get_kid_group_names(kid_name)
-    if not kid_name or not kid_groups:
+    kid = next((k for k in service._kids if kid_name and k["name"].lower() == kid_name.lower()), None)
+    if kid is None:
         return None
+    kid_groups = kid.get("exercise_groups", [])
     family = await service.resolve_family_members()
     me = {mid for mid, name in family.items() if name.lower() == kid_name.lower()}
     now = now or datetime.now(UTC)
@@ -1288,7 +1294,7 @@ async def kid_trainings(
             if (
                 e.get("id") in seen
                 or e.get("cancelled")
-                or "trening" not in e.get("heading", "").lower()
+                or any(w in e.get("heading", "").lower() for w in NOT_EXERCISE)
                 or not me & set(e.get("responses", {}).get("acceptedIds", []))
                 or not start
                 or not end
