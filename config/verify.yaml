@@ -1,0 +1,4 @@
+checks:
+  - {path: /health, status: 200}
+  - {path: /mcp, status: 401}
+  - {path: /sse, status: 401}

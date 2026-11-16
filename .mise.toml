@@ -121,6 +121,14 @@ run = """
 description = "Show service logs"
 run = "../../scripts/app-deploy.sh logs ${APP_NAME} ${NAMESPACE}"
 
+[tasks.verify]
+description = "Smoke-check the deployed service (config/verify.yaml; usage: -- [--strict])"
+run = "../../scripts/app-deploy.sh verify ${APP_NAME} ${NAMESPACE}"
+
+[tasks.promote]
+description = "Move 100 % traffic to the preview revision (after deploy -- --preview)"
+run = "../../scripts/app-deploy.sh promote ${APP_NAME} ${NAMESPACE}"
+
 [tasks.status]
 description = "Show service status"
 run = "../../scripts/app-deploy.sh status ${APP_NAME} ${NAMESPACE}"
