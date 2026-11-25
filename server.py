@@ -263,10 +263,7 @@ def format_event_summary(event: dict, family_members: dict[str, str] | None = No
         lines.append(f"Sted: {loc_name}")
 
     if event.get("description"):
-        desc = event["description"].strip()
-        if len(desc) > 200:
-            desc = desc[:197] + "..."
-        lines.append(desc)
+        lines.append(cut(event["description"].strip(), 200, f"get_event_details(event_id={event.get('id', '')})"))
 
     rsvp_dt = parse_timestamp(event.get("rsvpDate", ""))
     if rsvp_dt:
@@ -299,7 +296,7 @@ def format_event_summary(event: dict, family_members: dict[str, str] | None = No
 
 
 def format_event_detail(event: dict, family_members: dict[str, str] | None = None) -> str:
-    lines = [format_event_summary(event, family_members)]
+    lines = [format_event_summary({**event, "description": ""}, family_members)]
 
     location = event.get("location", {})
     if location.get("address"):
@@ -309,8 +306,7 @@ def format_event_detail(event: dict, family_members: dict[str, str] | None = Non
 
     if event.get("description"):
         desc = event["description"].strip()
-        if desc not in lines[0]:
-            lines.append(f"\n{desc}")
+        lines.append(f"\n{desc}")
 
     responses = event.get("responses", {})
     n_accepted = len(responses.get("acceptedIds", []))
@@ -339,6 +335,17 @@ def truncate(text: str | None, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
+def cut(text: str, limit: int, pointer: str) -> str:
+    """Cap at limit characters (code points, not bytes) and tell the client where the rest is."""
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]} [kuttet: {len(text) - limit} tegn til, bruk {pointer}]"
+
+
+def oneline(text: str | None) -> str:
+    return " ".join((text or "").split())
+
+
 CHAT_TYPES = {"DM": "privat", "GROUP": "gruppe", "CLUB_MESSAGE": "klubb"}
 
 
@@ -346,15 +353,18 @@ def format_chat_summary(chat: dict, people: dict[str, str] | None = None) -> str
     people = people or {}
     title = chat.get("name")
     if not title:
-        names = [people.get(p, "?") for p in chat.get("participants", [])[:3]]
+        participants = chat.get("participants", [])
+        names = [people.get(p, "?") for p in participants[:3]]
         title = ", ".join(names) or "Privat chat"
+        if len(participants) > 3:
+            title += f" +{len(participants) - 3}"
     kind = CHAT_TYPES.get(chat.get("type", ""), chat.get("type", "").lower())
     line = f"{title} ({kind}"
     msg = chat.get("message") or {}
     if ts := short_ts(msg.get("timestamp") or chat.get("newestTimestamp", "")):
         line += f", {ts}"
     line += ", ulest)" if chat.get("unread") else ")"
-    if text := truncate(msg.get("text"), 60):
+    if text := cut(oneline(msg.get("text")), 60, f"get_chat_messages(chat_id={chat['id']})"):
         line += f": {people.get(msg.get('user', ''), 'Ukjent')}: {text}"
     return line + f" [id: {chat['id']}]"
 
@@ -393,7 +403,7 @@ def attachment_lines(obj: dict, id_prefix: str, indent: str = "") -> list[str]:
 
 def format_message_summary(msg: dict, people: dict[str, str] | None = None, chat_id: str = "") -> str:
     sender = (people or {}).get(msg.get("user", ""), "Ukjent")
-    text = truncate(msg.get("text"), 500) or f"({msg.get('type', 'melding').lower()})"
+    text = oneline(msg.get("text")) or f"({msg.get('type', 'melding').lower()})"
     ts = short_ts(msg.get("timestamp", ""))
     line = f"[{ts}] {sender}: {text}" if ts else f"{sender}: {text}"
     msg_key = msg.get("msgNum", msg.get("id", ""))
@@ -440,7 +450,7 @@ def format_post_summary(
 
 def format_comment(comment: dict, people: dict[str, str], indent: str = "", post_id: str = "") -> list[str]:
     who = people.get(comment.get("fromProfileId", ""), "Ukjent")
-    lines = [f"{indent}[{short_ts(comment.get('timestamp', ''))}] {who}: {truncate(comment.get('text'), 300)}"]
+    lines = [f"{indent}[{short_ts(comment.get('timestamp', ''))}] {who}: {oneline(comment.get('text'))}"]
     lines.extend(attachment_lines(comment, f"comment:{post_id}:{comment.get('id', '')}", " " * len(indent) + "  "))
     for child in comment.get("children", []):
         lines.extend(format_comment(child, people, indent + "  ↳ ", post_id))
@@ -475,9 +485,9 @@ def format_activity(act: dict, group_map: dict[str, str], people: dict[str, str]
         parts.append(f"av {who}")
     line = " ".join(parts)
     if heading := (act.get("spond") or {}).get("heading"):
-        line += f": {truncate(heading, 60)}"
+        line += f": {oneline(heading)}"
     if text := (act.get("comment") or {}).get("text"):
-        line += f": {truncate(text, 80)}"
+        line += f": {oneline(text)}"
     for key, ref in (("post", "post_id"), ("spond", "event_id"), ("chat", "chat_id")):
         if ref_id := (act.get(key) or {}).get("id"):
             line += f" [{ref}: {ref_id}]"
@@ -933,7 +943,9 @@ async def handle_get_posts(
         if not group_id:
             return f"Fant ingen gruppe som matcher '{group_name}'."
 
-    posts = await service.get_posts(group_id=group_id, max_posts=min(max_posts, 50))
+    capped = min(max_posts, 50)
+    posts = await service.get_posts(group_id=group_id, max_posts=capped)
+    fetched = len(posts)
     cutoff = datetime.now(UTC) - timedelta(days=since_days)
     posts = [p for p in posts if (ts := parse_timestamp(p.get("timestamp", ""))) is None or ts >= cutoff]
     if not posts:
@@ -945,7 +957,16 @@ async def handle_get_posts(
     for post in posts:
         lines.append("")
         lines.append(format_post_summary(post, group_map, people))
+    if fetched >= capped:
+        lines.append("")
+        lines.append(more_note(capped, max_posts, "max_posts", "innlegg"))
     return "\n".join(lines)
+
+
+def more_note(capped: int, asked: int, arg: str, what: str) -> str:
+    if asked > capped:
+        return f"Viser høyst {capped} {what} (maks); eldre {what} kan finnes, men nås ikke herfra."
+    return f"Kan finnes flere {what} – bruk {arg} (maks 50)."
 
 
 async def handle_get_post_comments(service: SpondService, post_id: str) -> str:
@@ -963,7 +984,8 @@ async def handle_get_post_comments(service: SpondService, post_id: str) -> str:
 
 
 async def handle_get_chats(service: SpondService, max_chats: int = 10) -> str:
-    chats = await service.get_chats(max_chats=min(max_chats, 50))
+    capped = min(max_chats, 50)
+    chats = await service.get_chats(max_chats=capped)
     if not chats:
         return "Ingen chat-samtaler funnet."
 
@@ -971,6 +993,8 @@ async def handle_get_chats(service: SpondService, max_chats: int = 10) -> str:
     lines = [f"Nylige samtaler ({len(chats)} stk):"]
     for chat in chats:
         lines.append(f"  • {format_chat_summary(chat, people)}")
+    if len(chats) >= capped:
+        lines.append(more_note(capped, max_chats, "max_chats", "samtaler"))
     return "\n".join(lines)
 
 
@@ -982,6 +1006,11 @@ async def handle_get_chat_messages(service: SpondService, chat_id: str, limit: i
     people = await service.get_people_map()
     lines = [f"Meldinger i samtalen ({len(messages)} stk, eldste først):"]
     lines.extend(format_message_summary(msg, people, chat_id) for msg in messages)
+    oldest = min((m.get("msgNum") for m in messages if isinstance(m.get("msgNum"), int)), default=None)
+    if oldest and oldest > 1:
+        lines.append(f"({oldest - 1} eldre meldinger finnes; Spond gir bare de 10 nyeste. Les dem i Spond-appen.)")
+    elif limit > 10:
+        lines.append("(Spond gir høyst de 10 nyeste meldingene.)")
     return "\n".join(lines)
 
 
@@ -1001,9 +1030,13 @@ async def handle_get_updates(
     lines: list[str] = []
     seen: dict[tuple, int] = {}
     counts: dict[tuple, int] = {}
-    for act in await service.get_activities(100):
+    more = 0
+    reached_cutoff = False
+    activities = await service.get_activities(100)
+    for act in activities:
         ts = parse_timestamp(act.get("timestamp", ""))
         if ts and ts < cutoff:
+            reached_cutoff = True
             break
         if any(skip in act.get("type", "") for skip in ACTIVITY_SKIP):
             continue
@@ -1018,7 +1051,9 @@ async def handle_get_updates(
         if key in seen:
             continue
         if len(lines) >= limit:
-            break
+            if counts[key] == 1:
+                more += 1
+            continue
         seen[key] = len(lines)
         lines.append(format_activity(act, group_map, people))
     for key, i in seen.items():
@@ -1026,7 +1061,11 @@ async def handle_get_updates(
             lines[i] += f" (×{counts[key]})"
     if not lines:
         return f"Ingen nye hendelser de siste {since_hours} timene."
-    return f"Nytt i Spond siste {since_hours} t ({len(lines)} stk, nyeste først):\n" + "\n".join(lines)
+    if more:
+        lines.append(f"{more} flere – bruk limit")
+    if not reached_cutoff and len(activities) >= 100:
+        lines.append("Eldre hendelser i tidsvinduet nås ikke (Spond gir de 100 nyeste); bruk get_posts/get_chats.")
+    return f"Nytt i Spond siste {since_hours} t ({len(seen)} stk, nyeste først):\n" + "\n".join(lines)
 
 
 ATTACHMENT_TEXT_LIMIT = 15000

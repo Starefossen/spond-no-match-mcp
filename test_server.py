@@ -129,11 +129,16 @@ class TestFormatEventSummary:
         result = format_event_summary(MOCK_EVENTS_FJORDVIK[0])
         assert "Vanlig trening" in result
 
-    def test_long_description_truncated(self):
-        event = {**MOCK_EVENTS_FJORDVIK[0], "description": "x" * 300}
+    def test_long_description_cut_with_pointer(self):
+        event = {**MOCK_EVENTS_FJORDVIK[0], "id": "E1", "description": "æ" * 300}
         result = format_event_summary(event)
-        assert "..." in result
-        assert len([line for line in result.split("\n") if "x" in line][0]) < 210
+        assert "æ" * 200 + " [kuttet: 100 tegn til, bruk get_event_details(event_id=E1)]" in result
+        assert "æ" * 201 not in result
+
+    def test_detail_has_full_description_once(self):
+        event = {**MOCK_EVENTS_FJORDVIK[0], "description": "ø" * 300}
+        result = format_event_detail(event)
+        assert result.count("ø" * 300) == 1 and "kuttet" not in result
 
     def test_rsvp_date_shown(self):
         result = format_event_summary(MOCK_EVENTS_FJORDVIK[1])
@@ -1058,3 +1063,41 @@ async def test_kid_trainings_any_yes_in_exercise_groups_except_meetings(service,
     now = datetime(2026, 3, 6, 12, tzinfo=UTC)
     assert await server.kid_trainings(service, "Oliver", 7, now) == [{"day": "2026-03-02", "minutes": 60}]
     assert await server.kid_trainings(service, "Emma", 7, now) == []
+
+
+class TestNoSilentCuts:
+    def test_cut_counts_characters_not_bytes(self):
+        assert server.cut("å" * 10, 10, "x()") == "å" * 10
+        assert server.cut("å" * 12, 10, "x()") == "å" * 10 + " [kuttet: 2 tegn til, bruk x()]"
+
+    def test_long_chat_message_and_comment_not_cut(self):
+        long = "patrulje " * 100
+        msg = server.format_message_summary({"text": long, "user": "u"}, {}, "C")
+        assert long.strip() in msg and "kuttet" not in msg
+        comment = server.format_comment({"text": long}, {})
+        assert long.strip() in comment[0]
+
+    def test_activity_heading_and_comment_not_cut(self):
+        act = {"type": "comment", "spond": {"heading": "h" * 100}, "comment": {"text": "c" * 200}}
+        line = server.format_activity(act, {}, {})
+        assert "h" * 100 in line and "c" * 200 in line
+
+    def test_chat_summary_marks_cut_and_extra_participants(self):
+        chat = {"id": "C1", "participants": ["a", "b", "c", "d", "e"], "message": {"text": "m" * 70}}
+        line = server.format_chat_summary(chat, {})
+        assert "?, ?, ? +2" in line
+        assert "[kuttet: 10 tegn til, bruk get_chat_messages(chat_id=C1)]" in line
+
+    async def test_chat_messages_announces_older(self, service):
+        service.get_chat_messages = AsyncMock(return_value=[{"msgNum": 41, "text": "hei"}])
+        result = await handle_tool_call(service, "get_chat_messages", {"chat_id": "C", "limit": 50})
+        assert "40 eldre meldinger finnes" in result
+
+    async def test_updates_announces_more(self, service):
+        result = await handle_tool_call(service, "get_updates", {"limit": 1})
+        assert "1 flere – bruk limit" in result
+
+    async def test_chats_announces_cap(self, service):
+        service.get_chats = AsyncMock(return_value=[{"id": f"C{i}", "name": "x"} for i in range(50)])
+        result = await handle_tool_call(service, "get_chats", {"max_chats": 80})
+        assert "Viser høyst 50 samtaler" in result
