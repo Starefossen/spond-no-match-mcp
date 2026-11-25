@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import urllib.request
 from contextlib import asynccontextmanager
@@ -21,7 +22,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Mount, Route
 
 import mcpauth
-from server import TOOLS, SpondService, handle_tool_call, kid_events, kid_trainings
+from server import TOOLS, SpondService, ToolError, handle_tool_call, kid_events, kid_trainings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("spond-mcp")
@@ -137,6 +138,45 @@ WRITE_TOOLS = frozenset({"respond_to_event"})
 audit = logging.getLogger("spond-mcp.audit")
 
 
+_REDACT = [
+    (re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*://)[^/\s@\"']+@"), r"\1"),
+    (re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*://[^\s?#\"']*)[?#][^\s\"']*"), r"\1"),
+    (re.compile(r"(^|[\s\"'(=,;])[^\s/@:\"'(=,;]+:[^\s/@\"']+@"), r"\1"),
+    (re.compile(r"(?i)\b(bearer|basic)\s+(?![a-z]+\b)[A-Za-z0-9._~+/=\-]+"), r"\1 [redacted]"),
+    (
+        re.compile(
+            r"(?i)(\\?[\"']?)\b([a-z0-9_\-]*(?:password|passwd|passord|pwd)[a-z0-9_\-]*|authorization|private_?key)"
+            r"(\\?[\"']?)(\s*[=:]\s*)[^\n&,;}]+"
+        ),
+        r"\1\2\3\4[redacted]",
+    ),
+    (
+        re.compile(
+            r"(?i)(\\?[\"']?)\b([a-z0-9_\-]*(?:token|secret|session|signature)[a-z0-9_\-]*|sid|sig|api_?key|key)"
+            r"(\\?[\"']?)(\s*[=:]\s*)(?:\\\"[^\"\\]*\\\"|\"[^\"]*\"|'[^']*'|[^\s&\"',;}\\]+)"
+        ),
+        r"\1\2\3\4[redacted]",
+    ),
+]
+_TOKEN_RUN = re.compile(r"[A-Za-z0-9_\-.=+]{32,}")
+_MAX_REDACTED = 300
+
+
+def _token_like(t: str) -> bool:
+    kinds = sum(bool(re.search(p, t)) for p in ("[A-Z]", "[a-z]", "[0-9]"))
+    return kinds >= 2 and re.search(r"[A-Za-z0-9+=]{16,}", t) is not None
+
+
+def redact(s: str) -> str:
+    """Port of libs/mcpwrite Redact: strip URL queries, credentials and token-like runs; cap length."""
+    for pat, rep in _REDACT:
+        s = pat.sub(rep, s)
+    s = _TOKEN_RUN.sub(lambda m: "[redacted]" if _token_like(m.group()) else m.group(), s)
+    if len(s) > _MAX_REDACTED:
+        s = s[:_MAX_REDACTED] + f"… [kuttet: {len(s) - _MAX_REDACTED} tegn til]"
+    return s
+
+
 def tier(name: str) -> str:
     return "write" if name in WRITE_TOOLS else "read"
 
@@ -147,6 +187,8 @@ async def run_tool(name: str, arguments: dict | None) -> CallToolResult:
     error = None
     try:
         result = await auth.call(name, arguments)
+    except ToolError as e:
+        error = redact(str(e))
     except LoginFailed as e:
         error = str(e)
     except Unauthorized:

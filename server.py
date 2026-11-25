@@ -17,6 +17,10 @@ WEEKDAYS_NO = ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "s
 LOCAL_TZ = ZoneInfo("Europe/Oslo")
 
 
+class ToolError(Exception):
+    """A tool failure the caller should see as isError=true; the message is shown after scrubbing."""
+
+
 class SpondService:
     """Wraps the Spond library with TTL caching and family member resolution."""
 
@@ -756,7 +760,7 @@ async def handle_get_upcoming_events(
     if kid_name:
         kid_group_names = service.get_kid_group_names(kid_name)
         if not kid_group_names:
-            return f"Ukjent barn: {kid_name}"
+            raise ToolError(f"Ukjent barn: {kid_name}")
         groups = await service.get_groups()
         all_events: list[dict] = []
         seen_ids: set[str] = set()
@@ -809,7 +813,7 @@ async def handle_get_attendance(service: SpondService, kid_name: str = "", days:
     if kid_name:
         kid_group_names = service.get_kid_group_names(kid_name)
         if not kid_group_names:
-            return f"Ukjent barn: {kid_name}"
+            raise ToolError(f"Ukjent barn: {kid_name}")
         groups = await service.get_groups()
         all_events: list[dict] = []
         seen_ids: set[str] = set()
@@ -869,17 +873,17 @@ async def handle_respond_to_event(
 ) -> str:
     member_id = await service.find_member_id(kid_name)
     if not member_id:
-        return f"Fant ikke {kid_name} i noen Spond-gruppe."
+        raise ToolError(f"Fant ikke {kid_name} i noen Spond-gruppe.")
 
     try:
         result = await service.change_response(event_id, member_id, accept, decline_message)
     except Exception as e:
         logger.error("change_response failed for %s event %s: %s", kid_name, event_id, type(e).__name__)
-        return f"Kunne ikke sende svar for {kid_name}. Prøv igjen senere eller bruk Spond-appen."
+        raise ToolError(f"Kunne ikke sende svar for {kid_name}. Prøv igjen senere eller bruk Spond-appen.")
 
     if isinstance(result, dict) and "error" in result:
         logger.error("Spond API error for %s event %s: %s", kid_name, event_id, str(result.get("error"))[:200])
-        return f"Spond ga feil ved svar for {kid_name}. Prøv igjen senere eller bruk Spond-appen."
+        raise ToolError(f"Spond ga feil ved svar for {kid_name}. Prøv igjen senere eller bruk Spond-appen.")
 
     accepted_ids = set()
     declined_ids = set()
@@ -1117,7 +1121,7 @@ async def find_attachment(service: SpondService, attachment_id: str) -> dict | s
     try:
         index = int(parts[-1])
     except ValueError:
-        return f"Ugyldig vedleggs-ID: {attachment_id}"
+        raise ToolError(f"Ugyldig vedleggs-ID: {attachment_id}")
     if kind == "chat" and len(parts) == 3:
         msgs = await service.get_chat_messages(parts[0], limit=10)
         item = next((m for m in msgs if str(m.get("msgNum", m.get("id", ""))) == parts[1]), None)
@@ -1129,12 +1133,12 @@ async def find_attachment(service: SpondService, attachment_id: str) -> dict | s
             item = next((c for c in flat if c.get("id") == parts[1]), None)
         missing = "Fant ikke innlegget eller kommentaren blant de 50 nyeste innleggene."
     else:
-        return f"Ugyldig vedleggs-ID: {attachment_id}"
+        raise ToolError(f"Ugyldig vedleggs-ID: {attachment_id}")
     if not item:
         return missing
     attachments = extract_attachments(item)
     if not 0 <= index < len(attachments):
-        return f"Fant ikke vedlegg nr. {index} her."
+        raise ToolError(f"Fant ikke vedlegg nr. {index} her.")
     return attachments[index]
 
 
@@ -1167,10 +1171,10 @@ async def handle_get_attachment(service: SpondService, attachment_id: str) -> st
             data = await fetch_attachment(http, url)
         text = (await convert_pdf(docling_url, data, name)).strip()
     except AttachmentRejected as e:
-        return f"{header}\nKan ikke lese filen ({e}).\n{link}"
+        raise ToolError(f"{header}\nKan ikke lese filen ({e}).\n{link}")
     except httpx.HTTPError as e:
         logger.warning("get_attachment %s failed: %s", attachment_id, e)
-        return f"{header}\nKlarte ikke å lese PDF-en ({type(e).__name__}).\n{link}"
+        raise ToolError(f"{header}\nKlarte ikke å lese PDF-en ({type(e).__name__}).\n{link}")
     if not text:
         return f"{header}\nFant ingen tekst i PDF-en.\n{link}"
     if len(text) > ATTACHMENT_TEXT_LIMIT:
@@ -1195,7 +1199,7 @@ async def handle_tool_call(service: SpondService, name: str, arguments: dict | N
     elif name == "get_event_details":
         event_id = args.get("event_id", "")
         if not event_id:
-            return "event_id er påkrevd."
+            raise ToolError("event_id er påkrevd.")
         return await handle_get_event_details(service, event_id)
     elif name == "get_attendance":
         return await handle_get_attendance(
@@ -1209,7 +1213,7 @@ async def handle_tool_call(service: SpondService, name: str, arguments: dict | N
         kid_name = args.get("kid_name", "")
         accept = args.get("accept")
         if not event_id or not kid_name or accept is None:
-            return "event_id, kid_name og accept er påkrevd."
+            raise ToolError("event_id, kid_name og accept er påkrevd.")
         return await handle_respond_to_event(
             service,
             event_id=event_id,
@@ -1220,7 +1224,7 @@ async def handle_tool_call(service: SpondService, name: str, arguments: dict | N
     elif name == "search_events":
         query = args.get("query", "")
         if not query:
-            return "query er påkrevd."
+            raise ToolError("query er påkrevd.")
         return await handle_search_events(
             service,
             query=query,
@@ -1237,7 +1241,7 @@ async def handle_tool_call(service: SpondService, name: str, arguments: dict | N
     elif name == "get_post_comments":
         post_id = args.get("post_id", "")
         if not post_id:
-            return "post_id er påkrevd."
+            raise ToolError("post_id er påkrevd.")
         return await handle_get_post_comments(service, post_id)
     elif name == "get_updates":
         return await handle_get_updates(
@@ -1254,7 +1258,7 @@ async def handle_tool_call(service: SpondService, name: str, arguments: dict | N
     elif name == "get_chat_messages":
         chat_id = args.get("chat_id", "")
         if not chat_id:
-            return "chat_id er påkrevd."
+            raise ToolError("chat_id er påkrevd.")
         return await handle_get_chat_messages(
             service,
             chat_id=chat_id,
@@ -1263,10 +1267,10 @@ async def handle_tool_call(service: SpondService, name: str, arguments: dict | N
     elif name == "get_attachment":
         attachment_id = args.get("id", "")
         if not attachment_id:
-            return "id er påkrevd."
+            raise ToolError("id er påkrevd.")
         return await handle_get_attachment(service, attachment_id)
     else:
-        return f"Ukjent verktøy: {name}"
+        raise ToolError(f"Ukjent verktøy: {name}")
 
 
 async def kid_events(service: SpondService, kid_name: str, days: int = 1) -> list[dict] | None:

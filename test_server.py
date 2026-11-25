@@ -332,6 +332,12 @@ class TestGroupMatching:
         assert groups == []
 
 
+async def tool_error(*args) -> str:
+    with pytest.raises(server.ToolError) as e:
+        await handle_tool_call(*args)
+    return str(e.value)
+
+
 # --- Tool handlers via handle_tool_call ---
 
 
@@ -373,7 +379,7 @@ class TestGetUpcomingEvents:
 
     @pytest.mark.asyncio
     async def test_unknown_kid(self, service):
-        result = await handle_tool_call(service, "get_upcoming_events", {"kid_name": "Ukjent"})
+        result = await tool_error(service, "get_upcoming_events", {"kid_name": "Ukjent"})
         assert "Ukjent barn" in result
 
     @pytest.mark.asyncio
@@ -402,7 +408,7 @@ class TestGetEventDetails:
 
     @pytest.mark.asyncio
     async def test_missing_event_id(self, service):
-        result = await handle_tool_call(service, "get_event_details", {})
+        result = await tool_error(service, "get_event_details", {})
         assert "påkrevd" in result
 
     @pytest.mark.asyncio
@@ -426,7 +432,7 @@ class TestGetAttendance:
 
     @pytest.mark.asyncio
     async def test_unknown_kid(self, service):
-        result = await handle_tool_call(service, "get_attendance", {"kid_name": "Ukjent"})
+        result = await tool_error(service, "get_attendance", {"kid_name": "Ukjent"})
         assert "Ukjent barn" in result
 
 
@@ -462,7 +468,7 @@ class TestRespondToEvent:
 
     @pytest.mark.asyncio
     async def test_unknown_kid(self, service):
-        result = await handle_tool_call(
+        result = await tool_error(
             service,
             "respond_to_event",
             {"event_id": "EVT_KAMP_1", "kid_name": "Ukjent", "accept": True},
@@ -471,13 +477,13 @@ class TestRespondToEvent:
 
     @pytest.mark.asyncio
     async def test_missing_params(self, service):
-        result = await handle_tool_call(service, "respond_to_event", {})
+        result = await tool_error(service, "respond_to_event", {})
         assert "påkrevd" in result
 
     @pytest.mark.asyncio
     async def test_api_error(self, service):
         service._client.change_response.return_value = {"error": "Unauthorized"}
-        result = await handle_tool_call(
+        result = await tool_error(
             service,
             "respond_to_event",
             {"event_id": "EVT_KAMP_1", "kid_name": "Oliver", "accept": True},
@@ -488,7 +494,7 @@ class TestRespondToEvent:
     @pytest.mark.asyncio
     async def test_exception_hides_upstream_text(self, service):
         service._client.change_response.side_effect = RuntimeError("401 body={secret-token}")
-        result = await handle_tool_call(
+        result = await tool_error(
             service,
             "respond_to_event",
             {"event_id": "EVT_KAMP_1", "kid_name": "Oliver", "accept": True},
@@ -555,14 +561,14 @@ class TestSearchEvents:
 
     @pytest.mark.asyncio
     async def test_missing_query(self, service):
-        result = await handle_tool_call(service, "search_events", {})
+        result = await tool_error(service, "search_events", {})
         assert "påkrevd" in result
 
 
 class TestUnknownTool:
     @pytest.mark.asyncio
     async def test_unknown_tool(self, service):
-        result = await handle_tool_call(service, "nonexistent", {})
+        result = await tool_error(service, "nonexistent", {})
         assert "Ukjent verktøy" in result
 
 
@@ -667,7 +673,7 @@ class TestPostComments:
         assert "Fant ikke innlegget" in result
 
     async def test_missing_id(self, service):
-        assert "påkrevd" in await handle_tool_call(service, "get_post_comments", {})
+        assert "påkrevd" in await tool_error(service, "get_post_comments", {})
 
 
 class TestChats:
@@ -1008,14 +1014,14 @@ class TestAttachments:
             "clubMessage": {"attachments": [{"title": "a.pdf", "type": 2, "media": "https://evil.com/a.pdf"}]},
         }
         att_service.get_chat_messages = AsyncMock(return_value=[msg])
-        result = await handle_tool_call(att_service, "get_attachment", {"id": "chat:CH:7:0"})
+        result = await tool_error(att_service, "get_attachment", {"id": "chat:CH:7:0"})
         assert "Kan ikke lese filen" in result and "Lenke: https://evil.com/a.pdf" in result
         assert not mock_http
 
     async def test_bad_ids(self, att_service):
-        assert "Ugyldig" in await handle_tool_call(att_service, "get_attachment", {"id": "foo"})
-        assert "Fant ikke vedlegg" in await handle_tool_call(att_service, "get_attachment", {"id": "post:POST_M:5"})
-        assert "påkrevd" in await handle_tool_call(att_service, "get_attachment", {})
+        assert "Ugyldig" in await tool_error(att_service, "get_attachment", {"id": "foo"})
+        assert "Fant ikke vedlegg" in await tool_error(att_service, "get_attachment", {"id": "post:POST_M:5"})
+        assert "påkrevd" in await tool_error(att_service, "get_attachment", {})
 
 
 async def test_kid_events_only_own(service, mock_spond_client):

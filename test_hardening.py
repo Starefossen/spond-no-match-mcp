@@ -106,3 +106,47 @@ def test_write_tier(write_client):
     body["params"]["name"] = "get_posts"
     assert write_client.post("/messages/", json=body, headers=read).status_code != 401
     assert write_client.get("/sse", headers={"Authorization": "Bearer write-secret-token-xyz"}).status_code == 401
+
+
+async def test_tool_error_is_error_and_scrubbed(monkeypatch, caplog):
+    monkeypatch.setattr(main.auth, "call", AsyncMock(side_effect=main.ToolError(f"Ukjent barn: x {LEAK}")))
+    with caplog.at_level(logging.INFO, logger="spond-mcp.audit"):
+        res = await main.run_tool("get_upcoming_events", {})
+    assert res.isError
+    text = res.content[0].text
+    assert text.startswith("Ukjent barn: x boom https://api.spond.com/x ")
+    for bad in ("abc", "hunter2", "eyJ", "a" * 40):
+        assert bad not in text
+    assert "ok=False" in caplog.records[-1].getMessage()
+
+
+async def test_handler_failures_raise_tool_error():
+    from server import handle_tool_call
+
+    for name, args in [("get_event_details", {}), ("respond_to_event", {}), ("nope", {})]:
+        with pytest.raises(main.ToolError):
+            await handle_tool_call(None, name, args)
+
+
+@pytest.mark.parametrize(
+    "leak",
+    [
+        "postgres://admin:s3cr@db/x",
+        "https://x/y?token=s3cr",
+        "Bearer s3crABCDEFGH",
+        '{"access_token":"s3cr"}',
+        '{\\"token\\":\\"s3cr\\"}',
+        "password: correct horse s3cr",
+        "Authorization: s3cr",
+        "admin:s3cr@10.0.0.1",
+        "id 9fK2xQ7mZ1aB4cD8eF0gH3jL5nP6rS2tUs3cr",
+    ],
+)
+def test_redact_strips(leak):
+    assert "s3cr" not in main.redact(leak)
+
+
+def test_redact_keeps_text():
+    for s in ["Ukjent barn: Oliver", "event 3f2b1c9e-8a7d-4e6f-9b0a-1c2d3e4f5a6b", "requires basic auth"]:
+        assert main.redact(s) == s
+    assert main.redact("æ" * 310).endswith("… [kuttet: 10 tegn til]")
