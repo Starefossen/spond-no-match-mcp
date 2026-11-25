@@ -159,6 +159,18 @@ async def test_handler_failures_raise_tool_error():
         "credentials: s3cr",
         "blob abcdefgh/IJKLMN12/opqrst+UVWXYZ34/s3cr==",
         "1234:s3cr@db.example",
+        'token="s3crX1',
+        "token='s3crX1",
+        '{"token":["a]s3cr"]}',
+        '{"token":{"v":"a}s3cr"}}',
+        "token%3A%20s3crX1",
+        '{\\\\\\"token\\\\\\":\\\\\\"s3crX1\\\\\\"}',
+        "Bearer: s3crX1",
+        "auth=s3crX1",
+        "jwt: s3crX1",
+        "pw=s3crX1",
+        "passcode: s3cr x",
+        "pin=s3cr1234",
     ],
 )
 def test_redact_strips(leak):
@@ -178,7 +190,20 @@ def test_redact_keeps_text():
     assert main.redact("æ" * 310).endswith("… [kuttet: 10 tegn til]")
 
 
-@pytest.mark.parametrize("s", ["pwd-" * 1000, "token-" * 666, "a-" * 1999, "Bearer " * 600, "=" * 4000])
+@pytest.mark.parametrize(
+    "s",
+    [
+        "pwd-" * 1000,
+        "token-" * 666,
+        "a-" * 1999,
+        "Bearer " * 600,
+        "=" * 4000,
+        'token="' + "\\\\" * 2000,
+        "token=[" + '"]' * 2000,
+        "token={" + '"' * 4000,
+        '\\"token\\":' * 400,
+    ],
+)
 def test_redact_no_backtracking(s):
     start = time.monotonic()
     main.redact(s)
