@@ -171,6 +171,9 @@ async def test_handler_failures_raise_tool_error():
         "pw=s3crX1",
         "passcode: s3cr x",
         "pin=s3cr1234",
+        "a" * 50 + "_token_" + "b" * 50 + ": s3cr",
+        "x" * 45 + "password" + "y" * 45 + ": s3cr",
+        "--token=s3crX1",
     ],
 )
 def test_redact_strips(leak):
@@ -202,6 +205,9 @@ def test_redact_keeps_text():
         "token=[" + '"]' * 2000,
         "token={" + '"' * 4000,
         '\\"token\\":' * 400,
+        "a" * 3990 + "token",
+        "token" + "a" * 3990,
+        "-token" * 666,
     ],
 )
 def test_redact_no_backtracking(s):

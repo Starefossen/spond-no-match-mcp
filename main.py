@@ -148,13 +148,29 @@ _URL_USER = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*://)[^/\s@\"']+@")
 _URL_QUERY = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*://[^\s?#\"']*)[?#][^\s\"']*")
 _BARE_CREDS = re.compile(r"(^|[\s\"'(=,;])([^\s/@:\"'(=,;]+):[^\s/@\"']+@([A-Za-z0-9\-]+\.)?")
 _AUTH_HDR = re.compile(r"(?i)\b(bearer|basic):?\s+([A-Za-z0-9._~+/=\-]+)")
+def _key(words: str) -> str:
+    # Starts only at the start of a key run and is atomic, so a long key cannot backtrack.
+    return r"(?<![a-z0-9_\-])(?>[a-z0-9_\-]*?(?:" + words + r")[a-z0-9_\-]*+)"
+
+
 _PHRASE_KV = re.compile(
-    r"(?i)" + _Q + r"\b([a-z0-9_\-]{0,40}(?:password|passwd|passord|passcode|pwd)[a-z0-9_\-]{0,40}|pass|passphrase|pw"
-    r"|cookie|credentials|authorization|private_?key)" + _Q + _SEP + r"(?:" + _VAL + r"|[^\n&\"',;}]+)"
+    r"(?i)"
+    + _Q
+    + r"("
+    + _key("password|passwd|passord|passcode|pwd")
+    + r"|\b(?:pass|passphrase|pw|cookie|credentials|authorization|private_?key))"
+    + _Q
+    + _SEP
+    + r"(?:"
+    + _VAL
+    + r"|[^\n&\"',;}]+)"
 )
 _SECRET_KV = re.compile(
-    r"(?i)" + _Q + r"\b([a-z0-9_\-]{0,40}(?:token|secret|session|signature|jwt)[a-z0-9_\-]{0,40}"
-    r"|x-auth[a-z0-9_\-]{0,40}|auth|sid|sig|pin|api_?key|access_?key|key)"
+    r"(?i)"
+    + _Q
+    + r"("
+    + _key("token|secret|session|signature|jwt")
+    + r"|\b(?:x-auth[a-z0-9_\-]*+|auth|sid|sig|pin|api_?key|access_?key|key))"
     + _Q
     + _SEP
     + r"("
