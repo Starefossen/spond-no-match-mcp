@@ -18,7 +18,13 @@ LOCAL_TZ = ZoneInfo("Europe/Oslo")
 
 
 class ToolError(Exception):
-    """A tool failure the caller should see as isError=true; the message is shown after scrubbing."""
+    """A tool failure the caller should see as isError=true; the message is shown after scrubbing.
+
+    link is a URL we built from Spond data (maybe signed); it is appended unscrubbed."""
+
+    def __init__(self, message: str, link: str = ""):
+        super().__init__(message)
+        self.link = link
 
 
 class SpondService:
@@ -1171,10 +1177,10 @@ async def handle_get_attachment(service: SpondService, attachment_id: str) -> st
             data = await fetch_attachment(http, url)
         text = (await convert_pdf(docling_url, data, name)).strip()
     except AttachmentRejected as e:
-        raise ToolError(f"{header}\nKan ikke lese filen ({e}).\n{link}")
+        raise ToolError(f"{header}\nKan ikke lese filen ({e}).", link=link)
     except httpx.HTTPError as e:
         logger.warning("get_attachment %s failed: %s", attachment_id, e)
-        raise ToolError(f"{header}\nKlarte ikke å lese PDF-en ({type(e).__name__}).\n{link}")
+        raise ToolError(f"{header}\nKlarte ikke å lese PDF-en ({type(e).__name__}).", link=link)
     if not text:
         return f"{header}\nFant ingen tekst i PDF-en.\n{link}"
     if len(text) > ATTACHMENT_TEXT_LIMIT:

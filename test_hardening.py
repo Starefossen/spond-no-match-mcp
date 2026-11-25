@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -140,6 +141,23 @@ async def test_handler_failures_raise_tool_error():
         "Authorization: s3cr",
         "admin:s3cr@10.0.0.1",
         "id 9fK2xQ7mZ1aB4cD8eF0gH3jL5nP6rS2tUs3cr",
+        "Basic dXNlcjpwYXNzs3cr",
+        "Bearer sk-abc123s3cr",
+        "Bearer ABCDEFGHs3cr",
+        "Bearer abc.def.s3cr",
+        "token%3Ds3cr",
+        '{\\"token\\":\\"a\\\\\\"s3cr\\"}',
+        '{"token":["s3cr"]}',
+        '{"token":{"value":"s3cr"}}',
+        "token => s3cr",
+        "access_key=s3cr",
+        "pass: s3cr",
+        "passphrase: my s3cr",
+        "Cookie: a=s3cr",
+        "x-auth: s3cr",
+        "credentials: s3cr",
+        "blob abcdefgh/IJKLMN12/opqrst+UVWXYZ34/s3cr==",
+        "1234:s3cr@db.example",
     ],
 )
 def test_redact_strips(leak):
@@ -147,6 +165,32 @@ def test_redact_strips(leak):
 
 
 def test_redact_keeps_text():
-    for s in ["Ukjent barn: Oliver", "event 3f2b1c9e-8a7d-4e6f-9b0a-1c2d3e4f5a6b", "requires basic auth"]:
+    for s in [
+        "Ukjent barn: Oliver",
+        "event 3f2b1c9e-8a7d-4e6f-9b0a-1c2d3e4f5a6b",
+        "requires basic auth",
+        "session: tuesday training",
+        "time 10:30@home",
+        "https://calendar.example.com/api/v1/families/calendar/events/upcoming-weekly-summary-for-everyone",
+    ]:
         assert main.redact(s) == s
     assert main.redact("æ" * 310).endswith("… [kuttet: 10 tegn til]")
+
+
+def test_redact_long_input_fast():
+    start = time.monotonic()
+    out = main.redact("token" * 8000)
+    assert time.monotonic() - start < 0.2
+    assert out.endswith("… [kuttet: 39700 tegn til]")
+
+
+async def test_tool_error_keeps_trusted_link(monkeypatch):
+    link = "Lenke: https://files.spond.com/a.pdf?X-Amz-Signature=abc123"
+    monkeypatch.setattr(main.auth, "call", AsyncMock(side_effect=main.ToolError("Kan ikke lese filen.", link=link)))
+    res = await main.run_tool("get_attachment", {})
+    assert res.content[0].text.endswith(link)
+
+
+@pytest.mark.parametrize("tok", ["dXNlcjpwYXNz", "ABCDEFGHsecretval"])
+def test_redact_whole_auth_token(tok):
+    assert tok not in main.redact(f"Basic {tok}") and tok not in main.redact(f"Bearer {tok}")

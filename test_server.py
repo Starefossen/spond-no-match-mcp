@@ -335,7 +335,7 @@ class TestGroupMatching:
 async def tool_error(*args) -> str:
     with pytest.raises(server.ToolError) as e:
         await handle_tool_call(*args)
-    return str(e.value)
+    return str(e.value) + (f"\n{e.value.link}" if e.value.link else "")
 
 
 # --- Tool handlers via handle_tool_call ---
