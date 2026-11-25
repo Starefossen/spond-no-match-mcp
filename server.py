@@ -1165,7 +1165,8 @@ async def handle_get_attachment(service: SpondService, attachment_id: str) -> st
         return found
     name, url, ftype = found["name"], found["url"], found["type"]
     header = f"📎 {name}" + (f" ({ftype})" if ftype else "")
-    link = f"Lenke: {url}" if url else "Ingen lenke til filen."
+    trusted = len(url) <= 500 and allowed_attachment_url(url)
+    link = f"Lenke: {url}" if trusted else "Ingen lenke til filen."
     is_pdf = "pdf" in ftype.lower() or name.lower().endswith(".pdf") or urlparse(url).path.lower().endswith(".pdf")
     if not is_pdf or not url:
         return f"{header}\n{link}"

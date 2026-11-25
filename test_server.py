@@ -1015,7 +1015,7 @@ class TestAttachments:
         }
         att_service.get_chat_messages = AsyncMock(return_value=[msg])
         result = await tool_error(att_service, "get_attachment", {"id": "chat:CH:7:0"})
-        assert "Kan ikke lese filen" in result and "Lenke: https://evil.com/a.pdf" in result
+        assert "Kan ikke lese filen" in result and "evil.com" not in result
         assert not mock_http
 
     async def test_bad_ids(self, att_service):

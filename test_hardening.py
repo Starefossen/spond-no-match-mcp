@@ -135,6 +135,7 @@ async def test_handler_failures_raise_tool_error():
         "postgres://admin:s3cr@db/x",
         "https://x/y?token=s3cr",
         "Bearer s3crABCDEFGH",
+        "bearer s3crABCDEFGH",
         '{"access_token":"s3cr"}',
         '{\\"token\\":\\"s3cr\\"}',
         "password: correct horse s3cr",
@@ -175,6 +176,13 @@ def test_redact_keeps_text():
     ]:
         assert main.redact(s) == s
     assert main.redact("æ" * 310).endswith("… [kuttet: 10 tegn til]")
+
+
+@pytest.mark.parametrize("s", ["pwd-" * 1000, "token-" * 666, "a-" * 1999, "Bearer " * 600, "=" * 4000])
+def test_redact_no_backtracking(s):
+    start = time.monotonic()
+    main.redact(s)
+    assert time.monotonic() - start < 0.2
 
 
 def test_redact_long_input_fast():

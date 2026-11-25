@@ -145,11 +145,11 @@ _URL_QUERY = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*://[^\s?#\"']*)[?#][^\s\"']
 _BARE_CREDS = re.compile(r"(^|[\s\"'(=,;])([^\s/@:\"'(=,;]+):[^\s/@\"']+@([A-Za-z0-9\-]+\.)?")
 _AUTH_HDR = re.compile(r"(?i)\b(bearer|basic)\s+([A-Za-z0-9._~+/=\-]+)")
 _PHRASE_KV = re.compile(
-    r"(?i)(\\?[\"']?)\b([a-z0-9_\-]*(?:password|passwd|passord|pwd)[a-z0-9_\-]*|pass|passphrase|cookie|credentials"
+    r"(?i)(\\?[\"']?)\b([a-z0-9_\-]{0,40}(?:password|passwd|passord|pwd)[a-z0-9_\-]{0,40}|pass|passphrase|cookie|credentials"
     r"|authorization|private_?key)(\\?[\"']?)" + _SEP + r"(?:" + _VAL + r"|[^\n&\"',;}]+)"
 )
 _SECRET_KV = re.compile(
-    r"(?i)(\\?[\"']?)\b([a-z0-9_\-]*(?:token|secret|session|signature)[a-z0-9_\-]*|x-auth[a-z0-9_\-]*|sid|sig"
+    r"(?i)(\\?[\"']?)\b([a-z0-9_\-]{0,40}(?:token|secret|session|signature)[a-z0-9_\-]{0,40}|x-auth[a-z0-9_\-]{0,40}|sid|sig"
     r"|api_?key|access_?key|key)(\\?[\"']?)" + _SEP + r"(" + _VAL + r"|[^\s&\"',;}\\]+)"
 )
 _TOKEN_RUN = re.compile(r"[A-Za-z0-9_\-.=+/]{32,}")
