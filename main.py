@@ -12,7 +12,7 @@ import aiohttp
 import uvicorn
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
-from mcp.types import TextContent, Tool
+from mcp.types import CallToolResult, TextContent, Tool
 from spond import AuthenticationError
 from spond.spond import Spond
 from starlette.applications import Starlette
@@ -133,18 +133,109 @@ async def list_tools() -> list[Tool]:
     return [Tool(**t) for t in TOOLS]
 
 
-@mcp_server.call_tool()
-async def call_tool(name: str, arguments: dict | None) -> list[TextContent]:
+WRITE_TOOLS = frozenset({"respond_to_event"})
+audit = logging.getLogger("spond-mcp.audit")
+
+
+def tier(name: str) -> str:
+    return "write" if name in WRITE_TOOLS else "read"
+
+
+async def run_tool(name: str, arguments: dict | None) -> CallToolResult:
+    """Tool failures are isError with a short Norwegian message; raw exception text stays in the server log."""
+    start = time.monotonic()
+    error = None
     try:
         result = await auth.call(name, arguments)
     except LoginFailed as e:
-        result = str(e)
+        error = str(e)
     except Unauthorized:
-        result = "Spond avviste innloggingen, prøv igjen senere"
-    except Exception as e:
+        error = "Spond avviste innloggingen. Prøv igjen senere."
+    except Exception:
         logger.exception("Tool %s failed", name)
-        result = f"Feil: {e}"
-    return [TextContent(type="text", text=result)]
+        error = "Spond-kallet feilet. Prøv igjen senere, eller spør på en annen måte."
+    audit.info(
+        "audit caller=%s tool=%s tier=%s decision=allowed ok=%s latency_ms=%d",
+        mcpauth.caller() or "-",
+        name if any(t["name"] == name for t in TOOLS) else "unknown",
+        tier(name),
+        error is None,
+        (time.monotonic() - start) * 1000,
+    )
+    return CallToolResult(content=[TextContent(type="text", text=error or result)], isError=error is not None)
+
+
+@mcp_server.call_tool()
+async def call_tool(name: str, arguments: dict | None) -> CallToolResult:
+    return await run_tool(name, arguments)
+
+
+def needs_write(body: bytes) -> bool:
+    """True if the JSON-RPC body calls a write tool; unparseable bodies need write (fail closed)."""
+    body = body.strip()
+    if not body:
+        return False
+    try:
+        msgs = json.loads(body)
+    except ValueError:
+        return True
+    for m in msgs if isinstance(msgs, list) else [msgs]:
+        if not isinstance(m, dict):
+            return True
+        params = m.get("params")
+        if m.get("method") == "tools/call" and (not isinstance(params, dict) or params.get("name") in WRITE_TOOLS):
+            return True
+    return False
+
+
+MAX_BODY = 4 << 20
+
+
+class WriteGuard:
+    """Mirror of libs/mcpwrite.Guard: with WRITE_REQUIRES_WRITE_GROUP, write tool calls need group "write"."""
+
+    def __init__(self, callers: mcpauth.Auth, app):
+        self.read = callers.require("read", app)
+        self.write = callers.require("write", app)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") != "POST":
+            return await self.read(scope, receive, send)
+        chunks, size = [], 0
+        while True:
+            msg = await receive()
+            if msg["type"] == "http.disconnect":
+                return
+            chunks.append(msg.get("body", b""))
+            size += len(chunks[-1])
+            if size > MAX_BODY:
+                await send({"type": "http.response.start", "status": 413, "headers": []})
+                return await send({"type": "http.response.body", "body": b"request too large"})
+            if not msg.get("more_body"):
+                break
+        body = b"".join(chunks)
+        sent = False
+
+        async def replay():
+            nonlocal sent
+            if sent:
+                return await receive()
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        if not needs_write(body):
+            return await self.read(scope, replay, send)
+
+        async def audit_denied(msg):
+            if msg["type"] == "http.response.start" and msg["status"] == 401:
+                audit.info("audit caller=- tool=- tier=write decision=denied ok=False latency_ms=0")
+            await send(msg)
+
+        return await self.write(scope, replay, audit_denied)
+
+
+def write_required() -> bool:
+    return os.environ.get("WRITE_REQUIRES_WRITE_GROUP", "").strip().lower() in ("1", "t", "true", "yes")
 
 
 # HTTP handlers
@@ -216,13 +307,11 @@ def build_app(callers: mcpauth.Auth) -> Starlette:
         routes=[
             Route("/health", health),
             Mount("/api/minside", app=callers.require("minside", Starlette(routes=[Route("/today", minside_today)]))),
-            Mount(
-                "/api/exercise", app=callers.require("exercise", Starlette(routes=[Route("/days", exercise_days)]))
-            ),
+            Mount("/api/exercise", app=callers.require("exercise", Starlette(routes=[Route("/days", exercise_days)]))),
             Mount(
                 "/",
-                app=callers.require(
-                    "read",
+                app=(WriteGuard if write_required() else lambda c, a: c.require("read", a))(
+                    callers,
                     Starlette(
                         routes=[
                             Route("/sse", handle_sse),
@@ -248,6 +337,8 @@ if __name__ == "__main__":
         raise SystemExit(f"{e}; refusing to start without auth") from None
     if not callers.has("read"):
         raise SystemExit("mcpauth: no read group; refusing to start")
+    if write_required() and not callers.has("write"):
+        raise SystemExit("mcpauth: WRITE_REQUIRES_WRITE_GROUP set but no write group; refusing to start")
     require_credentials()
     port = int(os.environ.get("PORT", "8080"))
     logger.info("spond MCP server starting on :%d (auth enabled)", port)
